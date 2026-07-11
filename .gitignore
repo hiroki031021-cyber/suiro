@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.DS_Store
+
+# 仕様書は個人的な文脈を含むため公開リポジトリに含めない
+SPEC.md
