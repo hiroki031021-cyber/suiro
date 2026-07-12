@@ -1,4 +1,4 @@
-export type Mode = 'drain' | 'reread' | 'revise'
+export type Mode = 'drain' | 'dig' | 'reread' | 'revise' | 'checkpoint'
 
 export interface EncBody {
   iv: Uint8Array
@@ -8,11 +8,16 @@ export interface EncBody {
 export interface DiaryEntry {
   id: string // `${date}#${timestamp}`
   date: string // YYYY-MM-DD
-  mode: 'drain'
+  mode: 'drain' | 'dig'
   bodyEnc: EncBody
   emotionWord: string | null
   unlockAt: number
   metrics: { chars: number; pauses: number; durationSec: number; hasInsightWord: boolean }
+  /** 頻出語(平文・字句カウントのみ §10.0)。反芻検出に使う */
+  keywords?: string[]
+  /** タイムカプセルの状態。undefined=未解禁または未開封 */
+  capsuleState?: 'opened' | 'discarded'
+  heavyDay?: boolean
 }
 
 export interface EssaySentence {
@@ -34,6 +39,27 @@ export interface Phrase {
   text: string
   source: 'essay' | 'capsule'
   markedAt: number
+  /** フレーズの復路: 最後にクローズ&トークへ差し込まれた時刻(最古優先ローテーション) */
+  surfacedAt?: number
+}
+
+/** 定点観測(§3.6)。月1件。音声はバックアップに含めない */
+export interface CheckpointRecord {
+  month: string // YYYY-MM
+  createdAt: number
+  wordCount: number | null
+  fillerCount: number | null
+  silenceCount: number | null
+  closeTalkPrevCount: number | null
+  audio?: ArrayBuffer
+  mimeType?: string
+}
+
+/** 言えなかったことインボックス(最小形: 「次はこう言う」の一言のみ。7日で自動破棄) */
+export interface InboxItem {
+  id?: number
+  text: string
+  createdAt: number
 }
 
 export interface EmotionEntry {
@@ -55,6 +81,13 @@ export interface Draft {
   emotionWord: string
   pauses: number
   visibleMs: number
+  /** 問いガイド(dig)進行中: 現在のステップ(0-4) */
+  digStep?: number
+  /** 問いガイド: 1問目の回答(完了判定 §7.1 はこれで行う — textにはQ行が混ざるため) */
+  digFirstAnswer?: string
+  /** インボックス由来の問いを使った場合のid(完了時に消費) */
+  inboxId?: number
+  heavyDay?: boolean
 }
 
 /** 書き足し(判定に影響しない同日2本目)の下書き。settleStaleDraftの遡及完了対象外 */
@@ -80,9 +113,13 @@ export interface Settings {
   lastBackupAt: number | null
   usedQuestionIds: number[]
   closeTalk: { month: string; count: number }
+  /** 月替わりで消える前月分の声出し回数(定点観測でのみ表示 §3.6) */
+  closeTalkPrev: { month: string; count: number }
   reminderGuideShown: boolean
   notifiedOn: string | null
   backupNudgeMonth: string
+  /** 重い日モードの主語用(任意。未設定なら汎用文言) */
+  userName: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -101,7 +138,9 @@ export const DEFAULT_SETTINGS: Settings = {
   lastBackupAt: null,
   usedQuestionIds: [],
   closeTalk: { month: '', count: 0 },
+  closeTalkPrev: { month: '', count: 0 },
   reminderGuideShown: false,
   notifiedOn: null,
   backupNudgeMonth: '',
+  userName: '',
 }

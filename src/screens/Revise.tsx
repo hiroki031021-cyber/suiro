@@ -118,7 +118,7 @@ export function Revise({ essay, onReadDone, onUpdateSentence, onArchive, onExit 
 
       {step === 3 && (
         <>
-          <p class="hint-static">{COPY.reviseSummary}</p>
+          <p class="hint-static">{COPY.reviseSummaryToName(essay.recipient)}</p>
           <div class="essay-full blurred">
             {essay.sentences.map((s, i) => (
               <p key={i}>{s.text}</p>

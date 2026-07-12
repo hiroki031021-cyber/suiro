@@ -35,6 +35,15 @@ const BLOCKED_KEYS = new Set([
 /** IME活動からこの時間内は選択位置に一切触らない(変換キャンセル防止) */
 const IME_GRACE_MS = 250
 
+export interface EditorApi {
+  /** composition中でも現在のtextarea値を返す(確定待ちレース対策) */
+  getValue: () => string
+  /** 末尾に文字列を挿入(言い換えボタン §2.4)。IME変換中はfalseを返して何もしない */
+  append: (text: string) => boolean
+  /** 直近のappendを取り消す(挿入後5秒以内・追加入力なしの場合のみ) */
+  undoAppend: () => void
+}
+
 interface Props {
   initial: string
   placeholder: string
@@ -42,8 +51,7 @@ interface Props {
   onActivity: () => void
   onBlockedDelete: () => void
   onBlockedPaste: () => void
-  /** composition中でも現在のtextarea値を返すゲッターを親に渡す(確定待ちレース対策) */
-  register?: (getValue: () => string) => void
+  register?: (api: EditorApi) => void
 }
 
 export function NonstopEditor({
@@ -59,6 +67,7 @@ export function NonstopEditor({
   const committed = useRef(initial)
   const composing = useRef(false)
   const lastIme = useRef(0)
+  const lastAppend = useRef<{ prev: string; inserted: string; at: number } | null>(null)
 
   const markIme = () => {
     lastIme.current = Date.now()
@@ -102,7 +111,36 @@ export function NonstopEditor({
   useEffect(() => {
     const ta = ref.current
     if (!ta) return
-    register?.(() => ref.current?.value ?? committed.current)
+    register?.({
+      getValue: () => ref.current?.value ?? committed.current,
+      append: (t: string) => {
+        const el = ref.current
+        if (!el || composing.current || Date.now() - lastIme.current < IME_GRACE_MS) return false
+        const prev = committed.current
+        committed.current = prev + t
+        el.value = committed.current
+        lastAppend.current = { prev, inserted: t, at: Date.now() }
+        onChange(committed.current)
+        grow()
+        toEnd()
+        el.focus()
+        return true
+      },
+      undoAppend: () => {
+        const el = ref.current
+        const la = lastAppend.current
+        if (!el || !la || composing.current) return
+        if (Date.now() - la.at > 5000) return
+        // 挿入後に何か入力されていたら取り消さない(文中スプライスをしない)
+        if (committed.current !== la.prev + la.inserted) return
+        committed.current = la.prev
+        el.value = la.prev
+        lastAppend.current = null
+        onChange(la.prev)
+        grow()
+        toEnd()
+      },
+    })
     ta.value = committed.current
     // OSの事後置換を抑制(§11.2 層3)
     ta.setAttribute('autocorrect', 'off')

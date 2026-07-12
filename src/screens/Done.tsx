@@ -12,12 +12,16 @@ interface Props {
   newCard: CoachCard | null
   weekCount: number
   showCloseTalk: boolean
+  closeTalkRecipient: string | null // 宛先で話す: 今週のエッセイの宛先
+  closeTalkTwice: boolean // 二度言い: 第7段階解禁後の週1回
+  surfacedPhrase: string | null // フレーズの復路
   showReminderGuide: boolean
   backupNudge: string | null
   onCloseTalk: () => void
   onDismissReminderGuide: () => void
   onBonus: () => void
   onSettings: () => void
+  onCapture: () => void
 }
 
 export function Done(props: Props) {
@@ -28,6 +32,9 @@ export function Done(props: Props) {
       <header class="bar">
         <span class="mode-label">今日</span>
         <div class="bar-right">
+          <button class="ghost icon" onClick={props.onCapture} aria-label="言えなかったこと">
+            +
+          </button>
           <button class="ghost icon" onClick={props.onSettings} aria-label="設定">
             ⚙
           </button>
@@ -48,7 +55,14 @@ export function Done(props: Props) {
 
       {props.showCloseTalk && (
         <div class="close-talk">
-          <p>{COPY.closeTalk}</p>
+          <p>
+            {props.closeTalkTwice
+              ? COPY.closeTalkTwice
+              : props.closeTalkRecipient
+                ? COPY.closeTalkTo(props.closeTalkRecipient)
+                : COPY.closeTalk}
+          </p>
+          {props.surfacedPhrase && <p class="sub">{COPY.phraseLine(props.surfacedPhrase)}</p>}
           <p class="sub">{COPY.closeTalkSub}</p>
           {talked ? (
             <span class="talk-done">✓</span>

@@ -21,8 +21,10 @@ export type TodayPlan =
   | { kind: 'restart' }
   | { kind: 'completed' } // 今日は完了済み(または週末のもう一方の日)
   | { kind: 'drain'; minimal: boolean }
+  | { kind: 'dig' } // 問いガイド(火木 §3.2)
   | { kind: 'reread'; minimal: boolean }
   | { kind: 'revise'; minimal: boolean }
+  | { kind: 'checkpoint' } // 定点観測(第1日曜 §3.6)
 
 /**
  * 今日のモードを決める(§3「今日はこれ一つ」)。
@@ -40,6 +42,10 @@ export function planToday(s: Settings, reviseTargetEssay: Essay | null, days: Da
 
   const monday = weekMonday()
   if (dow === 6 || dow === 0) {
+    // 第1日曜は定点観測が優先(§3)。その週の推敲は土曜(先行起動日)が担う
+    const firstSunday = dow === 0 && Number(today.slice(8)) <= 7
+    const ckDoneThisMonth = days.some((d) => d.mode === 'checkpoint' && d.date.slice(0, 7) === today.slice(0, 7))
+    if (firstSunday && !ckDoneThisMonth) return { kind: 'checkpoint' }
     // 週末: 最初に起動した日=推敲。もう一方の日は完了画面(書き足しのみ)(§3)
     const revisedThisWeek = days.some((d) => d.mode === 'revise' && d.date >= monday && d.date <= today)
     if (revisedThisWeek) return { kind: 'completed' }
@@ -51,6 +57,10 @@ export function planToday(s: Settings, reviseTargetEssay: Essay | null, days: Da
     // 金曜: 再読(解禁前は排水)。minimal日でも再読のまま — マーク画面の通過だけで完了できる
     if (stageUnlocked(s, 6)) return { kind: 'reread', minimal }
     return { kind: 'drain', minimal }
+  }
+  if ((dow === 2 || dow === 4) && stageUnlocked(s, 5) && !minimal) {
+    // 火木: 問いガイド。1文だけでいい日(minimal)は最軽量の排水にフォールバック
+    return { kind: 'dig' }
   }
   return { kind: 'drain', minimal }
 }

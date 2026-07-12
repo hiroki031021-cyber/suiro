@@ -1,6 +1,15 @@
 import { QUESTION_BANK, type QuestionCategory } from '../data/questionBank'
 import type { Settings } from './types'
 
+/** 問いガイド(§3.2)。Q1は持ち越しの問いがあればそれに差し替わる */
+export const DIG_QUESTIONS = [
+  '今日いちばん引っかかったことは?',
+  'なぜ?',
+  'それはなぜ?',
+  '要するに、一言で言うと?',
+  'たとえば、具体的な場面で言うと?',
+]
+
 /** 問いバンクから未使用優先で1問選ぶ(§8.1)。使い切ったらそのカテゴリをリセット */
 export function pickQuestion(
   s: Settings,

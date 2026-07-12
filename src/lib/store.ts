@@ -1,9 +1,21 @@
 import { dbDel, dbGet, dbGetAll, dbPut } from './db'
-import { encryptText } from './crypto'
+import { decryptText, encryptText } from './crypto'
 import { lockNow, persistClock, todayStr, weekMonday } from './clock'
-import { hasInsightWord, meetsCompletion } from './metrics'
+import { extractKeywords } from './keywords'
+import { hasInsightWord, meetsCompletion, stripDigQuestions } from './metrics'
 import { EMOTION_WORDS } from '../data/emotionWords'
-import type { BonusDraft, DayRecord, DiaryEntry, Draft, EmotionEntry, Essay, Phrase, Settings } from './types'
+import type {
+  BonusDraft,
+  CheckpointRecord,
+  DayRecord,
+  DiaryEntry,
+  Draft,
+  EmotionEntry,
+  Essay,
+  InboxItem,
+  Phrase,
+  Settings,
+} from './types'
 import { DEFAULT_SETTINGS } from './types'
 
 // ---------- settings ----------
@@ -36,21 +48,38 @@ export async function settleStaleDraft(s: Settings): Promise<Settings> {
   const d = await loadDraft()
   if (!d || d.date === todayStr()) return s
   let changed = false
-  if (d.text.trim().length > 0) {
-    await commitDiary(d.date, d.text, d.emotionWord || null, {
-      chars: d.text.length,
-      pauses: d.pauses,
-      durationSec: Math.round(d.visibleMs / 1000),
-      hasInsightWord: hasInsightWord(d.text),
-    })
+  const isDig = d.digStep !== undefined
+  // digのtextはQ行入りprefixを含むため常に非空 — 回答部分の有無で判定する
+  const substance = isDig ? stripDigQuestions(d.text).trim() : d.text.trim()
+  if (substance.length > 0) {
+    await commitDiary(
+      d.date,
+      d.text,
+      d.emotionWord || null,
+      {
+        chars: d.text.length,
+        pauses: d.pauses,
+        durationSec: Math.round(d.visibleMs / 1000),
+        hasInsightWord: hasInsightWord(substance),
+      },
+      isDig ? 'dig' : 'drain',
+      d.heavyDay ?? false
+    )
     if (s.carryQuestion && s.carryQuestion === d.question) {
       s = { ...s, carryQuestion: null }
       changed = true
     }
-    if (meetsCompletion(d.text)) {
+    if (d.inboxId !== undefined) await dbDel('inbox', d.inboxId).catch(() => undefined)
+    // digのtextにはQ行(?入り)が混ざるため、完了判定は1問目の回答で行う(§7.1)
+    const done = isDig ? meetsCompletion(d.digFirstAnswer ?? '') : meetsCompletion(d.text)
+    if (done) {
       const existing = await dbGet<DayRecord>('days', d.date)
       if (!existing) {
-        await dbPut('days', { date: d.date, mode: 'drain', carryQuestion: null } satisfies DayRecord)
+        await dbPut('days', {
+          date: d.date,
+          mode: isDig ? 'dig' : 'drain',
+          carryQuestion: null,
+        } satisfies DayRecord)
         s = {
           ...s,
           completedSessions: s.completedSessions + 1,
@@ -86,20 +115,45 @@ export async function commitDiary(
   date: string,
   text: string,
   emotionWord: string | null,
-  metrics: DiaryEntry['metrics']
+  metrics: DiaryEntry['metrics'],
+  mode: 'drain' | 'dig' = 'drain',
+  heavyDay = false
 ): Promise<void> {
   const bodyEnc = await encryptText(text)
   const entry: DiaryEntry = {
     id: `${date}#${Date.now()}`,
     date,
-    mode: 'drain',
+    mode,
     bodyEnc,
     emotionWord,
     unlockAt: lockNow() + 30 * 86400000,
     metrics,
+    // 字句カウントのみ(§10.0)。反芻検出用。digはQ行を除いて抽出(汚染防止 §13.1)
+    keywords: extractKeywords(mode === 'dig' ? stripDigQuestions(text) : text),
+    heavyDay,
   }
   await dbPut('diary', entry)
   await persistClock()
+}
+
+/**
+ * 反芻検出(§10.2): 直近3日分の日記がすべて洞察語なしで、
+ * 頻出語の共通が2語以上なら、翌日の停止検出の一言を差し替える
+ */
+export async function checkRumination(): Promise<boolean> {
+  const all = await dbGetAll<DiaryEntry>('diary')
+  const byDate = new Map<string, DiaryEntry>()
+  // 同日複数エントリは先勝ち(最初=本編。書き足しは判定に影響させない §2.1)
+  for (const e of all.sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    if (!byDate.has(e.date)) byDate.set(e.date, e)
+  }
+  const recent = [...byDate.values()].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 3)
+  if (recent.length < 3) return false
+  if (recent.some((e) => e.metrics.hasInsightWord)) return false
+  const sets = recent.map((e) => new Set(e.keywords ?? []))
+  if (sets.some((s) => s.size === 0)) return false
+  const common = [...sets[0]].filter((w) => sets[1].has(w) && sets[2].has(w))
+  return common.length >= 2
 }
 
 // ---------- essays ----------
@@ -182,4 +236,99 @@ export function downloadText(name: string, text: string, type = 'text/plain'): v
   a.download = name
   a.click()
   URL.revokeObjectURL(a.href)
+}
+
+// ---------- タイムカプセル(§3.4) ----------
+
+export interface CapsuleWeek {
+  week: string // 週の月曜
+  entries: DiaryEntry[]
+}
+
+/**
+ * 解禁済み・未開封のカプセルのうち最も古い週(1週分ずつ届く §3.4)。
+ * 週の全エントリが解禁済みになってから届ける — エントリ単位で判定すると
+ * 週が分割配達され、「流した」週の残り半分が翌週復活してしまう
+ */
+export async function arrivedCapsule(): Promise<CapsuleWeek | null> {
+  const now = lockNow()
+  const all = await dbGetAll<DiaryEntry>('diary')
+  const pending = all.filter((e) => !e.capsuleState)
+  const byWeek = new Map<string, DiaryEntry[]>()
+  for (const e of pending) {
+    const w = weekMonday(new Date(e.date + 'T00:00:00'))
+    byWeek.set(w, [...(byWeek.get(w) ?? []), e])
+  }
+  const ready = [...byWeek.entries()]
+    .filter(([, entries]) => entries.every((e) => e.unlockAt <= now))
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+  if (ready.length === 0) return null
+  const [week, entries] = ready[0]
+  return { week, entries: entries.sort((a, b) => (a.date < b.date ? -1 : 1)) }
+}
+
+export interface OpenedCapsule {
+  words: string[]
+  bodies: { date: string; emotionWord: string | null; text: string }[]
+}
+
+/** 開封: 復号は1件ずつtry/catch(1件の破損で全滅させない)。頻出語は開封時に抽出 */
+export async function openCapsule(c: CapsuleWeek): Promise<OpenedCapsule> {
+  const bodies: OpenedCapsule['bodies'] = []
+  for (const e of c.entries) {
+    try {
+      bodies.push({ date: e.date, emotionWord: e.emotionWord, text: await decryptText(e.bodyEnc) })
+    } catch {
+      bodies.push({ date: e.date, emotionWord: e.emotionWord, text: '(この日の本文は読み出せなかった)' })
+    }
+  }
+  const words = extractKeywords(bodies.map((b) => b.text).join('\n'), 8)
+  return { words, bodies }
+}
+
+export async function setCapsuleState(c: CapsuleWeek, state: 'opened' | 'discarded'): Promise<void> {
+  for (const e of c.entries) await dbPut('diary', { ...e, capsuleState: state })
+}
+
+// ---------- 言えなかったことインボックス ----------
+
+export async function addInbox(text: string): Promise<void> {
+  const t = text.trim()
+  if (!t) return
+  await dbPut('inbox', { text: t, createdAt: Date.now() } satisfies Omit<InboxItem, 'id'>)
+}
+
+export async function oldestInbox(): Promise<InboxItem | null> {
+  const all = await dbGetAll<InboxItem>('inbox')
+  return all.sort((a, b) => a.createdAt - b.createdAt)[0] ?? null
+}
+
+export const deleteInbox = (id: number) => dbDel('inbox', id)
+
+/** 7日で黙って自動破棄(在庫管理をさせない) */
+export async function sweepInbox(): Promise<void> {
+  const all = await dbGetAll<InboxItem>('inbox')
+  const cutoff = Date.now() - 7 * 86400000
+  for (const i of all) {
+    if (i.createdAt < cutoff && i.id !== undefined) await dbDel('inbox', i.id)
+  }
+}
+
+// ---------- 定点観測(§3.6) ----------
+
+export const saveCheckpoint = (r: CheckpointRecord) => dbPut('checkpoints', r)
+export const getCheckpoint = (month: string) => dbGet<CheckpointRecord>('checkpoints', month)
+export async function listCheckpoints(): Promise<CheckpointRecord[]> {
+  return (await dbGetAll<CheckpointRecord>('checkpoints')).sort((a, b) => (a.month < b.month ? -1 : 1))
+}
+
+// ---------- フレーズの復路 ----------
+
+/** クローズ&トークに差し込む言い回しを1つ(最も長く再登場していないもの優先) */
+export async function surfacePhrase(): Promise<string | null> {
+  const all = await dbGetAll<Phrase>('phrases')
+  if (all.length === 0) return null
+  const pick = all.sort((a, b) => (a.surfacedAt ?? 0) - (b.surfacedAt ?? 0) || a.markedAt - b.markedAt)[0]
+  await dbPut('phrases', { ...pick, surfacedAt: Date.now() })
+  return pick.text
 }

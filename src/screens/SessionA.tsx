@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
-import { NonstopEditor } from '../components/NonstopEditor'
+import { NonstopEditor, type EditorApi } from '../components/NonstopEditor'
 import { Hint, TimerRing } from '../components/ui'
 import { COPY } from '../lib/copy'
 import { hasInsightWord, meetsCompletion } from '../lib/metrics'
@@ -11,6 +11,8 @@ import type { Settings } from '../lib/types'
 export interface SessionAResult {
   text: string
   emotion: string
+  question: string
+  heavyDay: boolean
   metrics: { chars: number; pauses: number; durationSec: number; hasInsightWord: boolean }
 }
 
@@ -23,11 +25,18 @@ interface Props {
   initialEmotion: string
   initialVisibleMs: number
   initialPauses: number
+  initialHeavy: boolean
   showEmotion: boolean
+  canRephrase: boolean // 第7段階
+  canHeavy: boolean // 第8段階
+  rumination: boolean // 反芻検出(§10.2): 停止検出の一言を差し替える
+  inboxId: number | undefined
+  onHeavyOn: () => Promise<string> // 時間距離の問いを取得
   onFinish: (r: SessionAResult) => void
   onPause: () => void
   onBackspaceHintShown: () => void
   onSettings: () => void
+  onCapture: () => void
 }
 
 export function SessionA(props: Props) {
@@ -41,10 +50,15 @@ export function SessionA(props: Props) {
   const [ended, setEnded] = useState(props.initialVisibleMs >= duration)
   const [progress, setProgress] = useState(props.initialVisibleMs / duration)
   const [ok, setOk] = useState(meetsCompletion(props.initialText))
+  const [heavy, setHeavy] = useState(props.initialHeavy)
+  const [activeQ, setActiveQ] = useState(props.question)
+  const [undoChip, setUndoChip] = useState(false)
 
   const text = useRef(props.initialText)
-  const getLive = useRef<() => string>(() => text.current)
+  const api = useRef<EditorApi | null>(null)
   const emotionRef = useRef(props.initialEmotion)
+  const activeQRef = useRef(props.question)
+  const heavyRef = useRef(props.initialHeavy)
   const visibleMs = useRef(props.initialVisibleMs)
   const lastActivity = useRef(Date.now())
   const pauses = useRef(props.initialPauses)
@@ -55,6 +69,7 @@ export function SessionA(props: Props) {
   const backspaceHintDone = useRef(settings.backspaceHintShown)
   const saveTimer = useRef<number | null>(null)
   const longPress = useRef<number | null>(null)
+  const undoTimer = useRef<number | null>(null)
   const finished = useRef(false)
 
   const persistDraft = () => {
@@ -66,11 +81,13 @@ export function SessionA(props: Props) {
     }
     void saveDraft({
       date: todayStr(),
-      question: props.question,
+      question: activeQRef.current,
       text: text.current,
       emotionWord: emotionRef.current,
       pauses: pauses.current,
       visibleMs: visibleMs.current,
+      inboxId: props.inboxId,
+      heavyDay: heavyRef.current,
     })
   }
   const schedulePersist = () => {
@@ -92,13 +109,17 @@ export function SessionA(props: Props) {
       }
       if (idle >= stallAfter && !stallShown.current) {
         stallShown.current = true
-        setHint({ text: COPY.stall, why: COPY.stallWhy })
+        setHint(
+          props.rumination
+            ? { text: COPY.rumination, why: COPY.ruminationWhy }
+            : { text: COPY.stall, why: COPY.stallWhy }
+        )
       }
       if (
         !insightShown.current &&
         duration >= 120000 &&
         visibleMs.current >= duration - 60000 &&
-        !hasInsightWord(getLive.current()) &&
+        !hasInsightWord(getLive()) &&
         !props.minimal
       ) {
         insightShown.current = true
@@ -127,9 +148,11 @@ export function SessionA(props: Props) {
     gapCounted.current = false
   }
 
+  const getLive = () => api.current?.getValue() ?? text.current
+
   /** composition確定待ちのままボタンが押されても本文を取りこぼさないよう、live値で同期する */
   const syncLive = () => {
-    text.current = getLive.current()
+    text.current = getLive()
   }
 
   const finish = () => {
@@ -139,6 +162,8 @@ export function SessionA(props: Props) {
     props.onFinish({
       text: text.current,
       emotion: emotionRef.current,
+      question: activeQRef.current,
+      heavyDay: heavyRef.current,
       metrics: {
         chars: text.current.length,
         pauses: pauses.current,
@@ -175,11 +200,40 @@ export function SessionA(props: Props) {
     }
   }
 
+  const rephrase = () => {
+    if (!api.current) return
+    if (api.current.append(COPY.rephraseInsert)) {
+      setUndoChip(true)
+      if (undoTimer.current) clearTimeout(undoTimer.current)
+      undoTimer.current = window.setTimeout(() => setUndoChip(false), 5000)
+      schedulePersist()
+    }
+  }
+
+  const toggleHeavy = async () => {
+    if (heavy) {
+      // OFF: プレースホルダのみ戻す(問いは表示中のまま。トグルはセッション限り §2.3)
+      setHeavy(false)
+      heavyRef.current = false
+      schedulePersist()
+      return
+    }
+    const dq = await props.onHeavyOn()
+    setHeavy(true)
+    heavyRef.current = true
+    setActiveQ(dq)
+    activeQRef.current = dq
+    schedulePersist()
+  }
+
   return (
     <div class="screen">
       <header class="bar">
         <span class="mode-label">{props.bonus ? '書き足し' : '排水'}</span>
         <div class="bar-right">
+          <button class="ghost icon" onClick={props.onCapture} aria-label="言えなかったこと">
+            +
+          </button>
           <button class="ghost icon" onClick={props.onSettings} aria-label="設定">
             ⚙
           </button>
@@ -209,6 +263,11 @@ export function SessionA(props: Props) {
             onPointerUp={() => longPress.current && clearTimeout(longPress.current)}
             onPointerLeave={() => longPress.current && clearTimeout(longPress.current)}
           />
+          {props.canHeavy && !props.bonus && (
+            <button class={`ghost ${heavy ? 'heavy-on' : ''}`} onClick={() => void toggleHeavy()}>
+              {COPY.heavyToggle}
+            </button>
+          )}
           <button class="ghost" onClick={() => setPaletteOpen(!paletteOpen)}>
             語
           </button>
@@ -234,13 +293,13 @@ export function SessionA(props: Props) {
         </div>
       )}
 
-      <div class="question">{props.question}</div>
+      <div class="question">{activeQ}</div>
 
       <NonstopEditor
         initial={props.initialText}
-        placeholder={settings.addresseeTemplate}
-        register={(g) => {
-          getLive.current = g
+        placeholder={heavy ? COPY.heavyPlaceholder(settings.userName) : settings.addresseeTemplate}
+        register={(a) => {
+          api.current = a
         }}
         onChange={(t) => {
           text.current = t
@@ -254,6 +313,25 @@ export function SessionA(props: Props) {
 
       <div class="timer-row">
         <TimerRing progress={progress} />
+        {props.canRephrase && (
+          <span class="rephrase-row">
+            <button class="ghost" onClick={rephrase}>
+              言い換え
+            </button>
+            {undoChip && (
+              <button
+                class="ghost undo-chip fade-in"
+                onClick={() => {
+                  api.current?.undoAppend()
+                  setUndoChip(false)
+                  schedulePersist()
+                }}
+              >
+                {COPY.rephraseUndo}
+              </button>
+            )}
+          </span>
+        )}
         {ended && (
           <div class="end-line fade-in">
             <span>{COPY.timerEnd}</span>

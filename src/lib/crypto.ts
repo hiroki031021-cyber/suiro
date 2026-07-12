@@ -1,5 +1,15 @@
 import { dbGet, dbGetAll, openDB } from './db'
-import type { DayRecord, DiaryEntry, EmotionEntry, EncBody, Essay, Phrase, Settings } from './types'
+import type {
+  CheckpointRecord,
+  DayRecord,
+  DiaryEntry,
+  EmotionEntry,
+  EncBody,
+  Essay,
+  InboxItem,
+  Phrase,
+  Settings,
+} from './types'
 
 // マスター鍵は生バイトで端末に保存する。バックアップ時にパスフレーズ由来のKEKで
 // ラップするには鍵素材が必要で、extractable:false のCryptoKeyは後からwrapできない。
@@ -114,6 +124,9 @@ interface BackupPayload {
   phrases: Phrase[]
   emotions: EmotionEntry[]
   days: DayRecord[]
+  /** 音声は含めない(§9.3: 数字が本体、音声は使い捨て。サイズ膨張も防ぐ) */
+  checkpoints?: Omit<CheckpointRecord, 'audio' | 'mimeType'>[]
+  inbox?: InboxItem[]
 }
 
 export async function exportBackup(pass: string): Promise<Blob> {
@@ -130,6 +143,10 @@ export async function exportBackup(pass: string): Promise<Blob> {
     phrases: await dbGetAll<Phrase>('phrases'),
     emotions: await dbGetAll<EmotionEntry>('emotions'),
     days: await dbGetAll<DayRecord>('days'),
+    checkpoints: (await dbGetAll<CheckpointRecord>('checkpoints')).map(
+      ({ audio, mimeType, ...rest }) => rest
+    ),
+    inbox: await dbGetAll<InboxItem>('inbox'),
   }
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
@@ -165,8 +182,12 @@ export async function importBackup(fileText: string, pass: string): Promise<void
     // 復元は全ストアにまたがる単一txで行う。途中失敗時は自動abortで元データが残る
     const db = await openDB()
     await new Promise<void>((resolve, reject) => {
-      const t = db.transaction(['kv', 'diary', 'essays', 'phrases', 'emotions', 'days'], 'readwrite')
-      for (const s of ['diary', 'essays', 'phrases', 'emotions', 'days'] as const) t.objectStore(s).clear()
+      const t = db.transaction(
+        ['kv', 'diary', 'essays', 'phrases', 'emotions', 'days', 'checkpoints', 'inbox'],
+        'readwrite'
+      )
+      for (const s of ['diary', 'essays', 'phrases', 'emotions', 'days', 'checkpoints', 'inbox'] as const)
+        t.objectStore(s).clear()
       const kv = t.objectStore('kv')
       kv.put(fromB64(payload.keyRaw), 'keyRaw')
       if (payload.settings) kv.put(payload.settings, 'settings')
@@ -180,6 +201,8 @@ export async function importBackup(fileText: string, pass: string): Promise<void
       for (const p of payload.phrases) t.objectStore('phrases').put(p)
       for (const e of payload.emotions) t.objectStore('emotions').put(e)
       for (const d of payload.days) t.objectStore('days').put(d)
+      for (const c of payload.checkpoints ?? []) t.objectStore('checkpoints').put(c)
+      for (const i of payload.inbox ?? []) t.objectStore('inbox').put(i)
       t.oncomplete = () => resolve()
       t.onabort = () => reject(t.error)
       t.onerror = () => reject(t.error)

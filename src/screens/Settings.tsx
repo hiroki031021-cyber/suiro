@@ -121,6 +121,12 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         value={settings.addresseeTemplate}
         onInput={(e: any) => set({ addresseeTemplate: e.currentTarget.value })}
       />
+      <label class="field-label">自分の名前(「重い日」の主語に使う。任意)</label>
+      <input
+        class="text-input"
+        value={settings.userName}
+        onInput={(e: any) => set({ userName: e.currentTarget.value })}
+      />
       <label class="field-label">排水タイマー</label>
       <select
         class="text-input"

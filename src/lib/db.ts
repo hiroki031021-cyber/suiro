@@ -1,7 +1,7 @@
 const DB_NAME = 'suiro'
-const DB_VERSION = 1
+const DB_VERSION = 2 // v2: checkpoints(定点観測), inbox(言えなかったこと)
 
-export type StoreName = 'kv' | 'diary' | 'essays' | 'phrases' | 'emotions' | 'days'
+export type StoreName = 'kv' | 'diary' | 'essays' | 'phrases' | 'emotions' | 'days' | 'checkpoints' | 'inbox'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -9,6 +9,12 @@ export function openDB(): Promise<IDBDatabase> {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const req = indexedDB.open(DB_NAME, DB_VERSION)
+      // v1.0のタブがonversionchange未実装のまま接続を握っているとblockedで永久待ちになる
+      req.onblocked = () => {
+        const el = document.getElementById('app')
+        if (el)
+          el.textContent = '別のタブ/ウィンドウで水路が開いています。そちらを閉じてから、再読み込みしてください。'
+      }
       req.onupgradeneeded = () => {
         const db = req.result
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv')
@@ -18,8 +24,19 @@ export function openDB(): Promise<IDBDatabase> {
           db.createObjectStore('phrases', { keyPath: 'id', autoIncrement: true })
         if (!db.objectStoreNames.contains('emotions')) db.createObjectStore('emotions', { keyPath: 'word' })
         if (!db.objectStoreNames.contains('days')) db.createObjectStore('days', { keyPath: 'date' })
+        if (!db.objectStoreNames.contains('checkpoints'))
+          db.createObjectStore('checkpoints', { keyPath: 'month' })
+        if (!db.objectStoreNames.contains('inbox'))
+          db.createObjectStore('inbox', { keyPath: 'id', autoIncrement: true })
       }
-      req.onsuccess = () => resolve(req.result)
+      req.onsuccess = () => {
+        // 別タブが新バージョンでDBを開いたら、このタブは閉じて再読込(旧SWキャッシュとの併走対策)
+        req.result.onversionchange = () => {
+          req.result.close()
+          location.reload()
+        }
+        resolve(req.result)
+      }
       req.onerror = () => reject(req.error)
     })
   }

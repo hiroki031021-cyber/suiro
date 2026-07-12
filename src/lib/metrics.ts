@@ -9,3 +9,11 @@ export function hasInsightWord(text: string): boolean {
 export function meetsCompletion(text: string): boolean {
   return /[。.!?!?]/.test(text) || text.replace(/\s/g, '').length >= 20
 }
+
+/**
+ * 問いガイドの本文からQ行を除く。Q4「要するに、一言で言うと?」等が
+ * 洞察語判定・頻出語抽出を汚染するため、判定は回答部分のみで行う(§13.1)
+ */
+export function stripDigQuestions(text: string): string {
+  return text.replace(/^Q\. .*$/gm, '')
+}
