@@ -7,6 +7,7 @@ import type {
   EncBody,
   Essay,
   InboxItem,
+  Note,
   Phrase,
   Settings,
 } from './types'
@@ -127,6 +128,8 @@ interface BackupPayload {
   /** 音声は含めない(§9.3: 数字が本体、音声は使い捨て。サイズ膨張も防ぐ) */
   checkpoints?: Omit<CheckpointRecord, 'audio' | 'mimeType'>[]
   inbox?: InboxItem[]
+  /** v2: 五つの段のノート(§14.6) */
+  notes?: Note[]
 }
 
 export async function exportBackup(pass: string): Promise<Blob> {
@@ -147,6 +150,7 @@ export async function exportBackup(pass: string): Promise<Blob> {
       ({ audio, mimeType, ...rest }) => rest
     ),
     inbox: await dbGetAll<InboxItem>('inbox'),
+    notes: await dbGetAll<Note>('notes'),
   }
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const iv = crypto.getRandomValues(new Uint8Array(12))
@@ -183,10 +187,10 @@ export async function importBackup(fileText: string, pass: string): Promise<void
     const db = await openDB()
     await new Promise<void>((resolve, reject) => {
       const t = db.transaction(
-        ['kv', 'diary', 'essays', 'phrases', 'emotions', 'days', 'checkpoints', 'inbox'],
+        ['kv', 'diary', 'essays', 'phrases', 'emotions', 'days', 'checkpoints', 'inbox', 'notes'],
         'readwrite'
       )
-      for (const s of ['diary', 'essays', 'phrases', 'emotions', 'days', 'checkpoints', 'inbox'] as const)
+      for (const s of ['diary', 'essays', 'phrases', 'emotions', 'days', 'checkpoints', 'inbox', 'notes'] as const)
         t.objectStore(s).clear()
       const kv = t.objectStore('kv')
       kv.put(fromB64(payload.keyRaw), 'keyRaw')
@@ -195,6 +199,7 @@ export async function importBackup(fileText: string, pass: string): Promise<void
       // 復元前の書きかけが別データセットに混入しないよう消す
       kv.delete('draft')
       kv.delete('bonusDraft')
+      kv.delete('noteDraft')
       for (const d of payload.diary)
         t.objectStore('diary').put({ ...d, bodyEnc: { iv: fromB64(d.bodyEnc.iv), ct: fromB64(d.bodyEnc.ct).buffer } })
       for (const e of payload.essays) t.objectStore('essays').put(e)
@@ -203,6 +208,7 @@ export async function importBackup(fileText: string, pass: string): Promise<void
       for (const d of payload.days) t.objectStore('days').put(d)
       for (const c of payload.checkpoints ?? []) t.objectStore('checkpoints').put(c)
       for (const i of payload.inbox ?? []) t.objectStore('inbox').put(i)
+      for (const n of payload.notes ?? []) t.objectStore('notes').put(n)
       t.oncomplete = () => resolve()
       t.onabort = () => reject(t.error)
       t.onerror = () => reject(t.error)

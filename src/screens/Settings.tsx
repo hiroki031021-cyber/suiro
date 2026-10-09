@@ -5,8 +5,8 @@ import { dbGetAll } from '../lib/db'
 import { exportBackup, importBackup } from '../lib/crypto'
 import { downloadIcs } from '../lib/ics'
 import { stageUnlocked } from '../lib/schedule'
-import { downloadText } from '../lib/store'
-import type { Essay, Phrase, Settings } from '../lib/types'
+import { downloadText, listNotes, notesToMarkdown } from '../lib/store'
+import type { Essay, Note, Settings } from '../lib/types'
 
 interface Props {
   settings: Settings
@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function SettingsScreen({ settings, onChange, onBack }: Props) {
-  const [phrases, setPhrases] = useState<Phrase[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
   const [archived, setArchived] = useState<Essay[]>([])
   const [pass, setPass] = useState('')
   const [importPass, setImportPass] = useState('')
@@ -23,9 +23,9 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
-    void dbGetAll<Phrase>('phrases').then(setPhrases)
+    void listNotes().then(setNotes)
     void dbGetAll<Essay>('essays').then((all) =>
-      setArchived(all.filter((e) => e.archivedAt !== null).sort((a, b) => (a.weekOf < b.weekOf ? 1 : -1)))
+      setArchived(all.filter((e) => e.sentences.length > 0).sort((a, b) => (a.weekOf < b.weekOf ? 1 : -1)))
     )
     if (navigator.storage?.persisted) void navigator.storage.persisted().then(setPersisted)
   }, [])
@@ -115,29 +115,15 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         value={settings.donePhrase}
         onInput={(e: any) => set({ donePhrase: e.currentTarget.value })}
       />
-      <label class="field-label">書き出しの宛先(プレースホルダ)</label>
-      <input
-        class="text-input"
-        value={settings.addresseeTemplate}
-        onInput={(e: any) => set({ addresseeTemplate: e.currentTarget.value })}
-      />
-      <label class="field-label">自分の名前(「重い日」の主語に使う。任意)</label>
-      <input
-        class="text-input"
-        value={settings.userName}
-        onInput={(e: any) => set({ userName: e.currentTarget.value })}
-      />
-      <label class="field-label">排水タイマー</label>
+      <label class="field-label">1日の持ち時間(声の60秒を含む。各段の配分は比例して伸縮)</label>
       <select
         class="text-input"
-        value={String(settings.drainSeconds)}
-        onChange={(e: any) => set({ drainSeconds: Number(e.currentTarget.value) })}
+        value={String(settings.sessionMinutes)}
+        onChange={(e: any) => set({ sessionMinutes: Number(e.currentTarget.value) })}
       >
-        <option value="120">2:00</option>
-        <option value="150">2:30(標準)</option>
-        <option value="180">3:00</option>
-        <option value="240">4:00</option>
-        <option value="300">5:00</option>
+        <option value="10">10分</option>
+        <option value="15">15分(標準)</option>
+        <option value="20">20分</option>
       </select>
 
       <div class="section-label">型の稽古</div>
@@ -161,22 +147,21 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         </details>
       ))}
 
-      <div class="section-label">フレーズ帳</div>
-      {phrases.length === 0 ? (
-        <p class="empty">まだ空。金曜の再読で、自分らしい言い回しを拾える</p>
-      ) : (
-        <ul class="phrase-list">
-          {phrases.map((p) => (
-            <li key={p.id}>{p.text}</li>
-          ))}
-        </ul>
-      )}
-
-      <div class="section-label">仕舞ったエッセイ</div>
-      {archived.length === 0 ? (
+      <div class="section-label">ノート</div>
+      {notes.length === 0 ? (
         <p class="empty">まだない</p>
       ) : (
         <>
+          <p class="note">{notes.length}日分。日々の読み返しはしない — 日曜に今週の②が並ぶ。</p>
+          <button class="ghost" onClick={() => downloadText('suiro-notes.md', notesToMarkdown(notes), 'text/markdown')}>
+            Markdownで書き出す
+          </button>
+        </>
+      )}
+
+      {archived.length > 0 && (
+        <>
+          <div class="section-label">以前のエッセイ(v1)</div>
           {archived.map((e) => (
             <details key={e.weekOf} class="card-details">
               <summary>
@@ -196,7 +181,7 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
 
       <div class="section-label">データ</div>
       <p class="note">
-        すべてこの端末の中にある。日記の本文は保存と同時に暗号化され、30日間は誰からも(自分からも)読めない。
+        すべてこの端末の中にある。外には送らない。
         {persisted !== null && (persisted ? ' ストレージは永続化済み。' : ' ストレージは未永続化 — ホーム画面に追加すると安全。')}
       </p>
       <label class="field-label">バックアップ用パスフレーズ</label>

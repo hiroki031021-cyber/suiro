@@ -1,6 +1,6 @@
 // 水路 service worker — installでコアをプリキャッシュ+ネットワーク優先/キャッシュフォールバック
 // パスはすべてSWのスコープ相対(GitHub Pagesのサブパス配信に対応)
-const CACHE = 'suiro-v3'
+const CACHE = 'suiro-v4'
 const CORE = ['./', './manifest.webmanifest', './icon.svg', './icon-512.png', './apple-touch-icon.png']
 
 self.addEventListener('install', (e) => {

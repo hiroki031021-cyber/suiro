@@ -48,16 +48,15 @@ export function monthStr(d: Date = new Date()): string {
 }
 
 /**
- * lastとtodayの間(両端排他)にある月〜金の日数 = 欠落した必須日数。
- * 週末は「両日とも起動しなくてもよい」(§3)ため欠落に数えない —
- * 暦日で数えると金曜完了→月曜起動が毎週「1文だけの日」になってしまう。
+ * lastとtodayの間(両端排他)にある月〜土の日数 = 欠落した必須日数。
+ * 日曜は「選び直し」の日で、起動しなくてもよい(§14.4)ため欠落に数えない。
  */
 export function missedRequiredDays(last: string, today: string): number {
   let n = 0
   let guard = 0
   for (let d = addDays(last, 1); d < today && guard < 400; d = addDays(d, 1), guard++) {
     const dow = new Date(d + 'T00:00:00').getDay()
-    if (dow >= 1 && dow <= 5) n++
+    if (dow >= 1 && dow <= 6) n++
   }
   return n
 }

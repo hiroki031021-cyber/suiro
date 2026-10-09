@@ -1,10 +1,12 @@
-export type Mode = 'drain' | 'dig' | 'reread' | 'revise' | 'checkpoint'
+/** 'drain'|'dig'|'reread'|'revise' はv1の完了レコード用(読み出し互換のため残す) */
+export type Mode = 'note' | 'review' | 'checkpoint' | 'drain' | 'dig' | 'reread' | 'revise'
 
 export interface EncBody {
   iv: Uint8Array
   ct: ArrayBuffer
 }
 
+/** v1の日記(暗号化・30日ロック)。v2では書かれないが、タイムカプセルとして届き続ける(§14.7) */
 export interface DiaryEntry {
   id: string // `${date}#${timestamp}`
   date: string // YYYY-MM-DD
@@ -13,9 +15,7 @@ export interface DiaryEntry {
   emotionWord: string | null
   unlockAt: number
   metrics: { chars: number; pauses: number; durationSec: number; hasInsightWord: boolean }
-  /** 頻出語(平文・字句カウントのみ §10.0)。反芻検出に使う */
   keywords?: string[]
-  /** タイムカプセルの状態。undefined=未解禁または未開封 */
   capsuleState?: 'opened' | 'discarded'
   heavyDay?: boolean
 }
@@ -25,8 +25,9 @@ export interface EssaySentence {
   text: string
 }
 
+/** v1のエッセイ。v2では書かれない。設定画面で読める・書き出せるだけ */
 export interface Essay {
-  weekOf: string // 週の月曜 YYYY-MM-DD
+  weekOf: string
   theme: string
   recipient: string
   sentences: EssaySentence[]
@@ -39,7 +40,6 @@ export interface Phrase {
   text: string
   source: 'essay' | 'capsule'
   markedAt: number
-  /** フレーズの復路: 最後にクローズ&トークへ差し込まれた時刻(最古優先ローテーション) */
   surfacedAt?: number
 }
 
@@ -55,7 +55,6 @@ export interface CheckpointRecord {
   mimeType?: string
 }
 
-/** 言えなかったことインボックス(最小形: 「次はこう言う」の一言のみ。7日で自動破棄) */
 export interface InboxItem {
   id?: number
   text: string
@@ -71,9 +70,49 @@ export interface EmotionEntry {
 export interface DayRecord {
   date: string
   mode: Mode
+  /** v2: その日の④が「仮説」だったときの仮説文(系譜用)。v1では持ち越しの問い */
   carryQuestion: string | null
 }
 
+// ---------- v2: 五つの段(§14) ----------
+
+/** ④のタグ。根拠/反例/仮説 */
+export type EvidenceKind = 'ground' | 'counter' | 'hypothesis'
+
+export interface NoteFields {
+  content: string // ①コンテンツ
+  insight: string // ②気づき
+  story: string // ③自分のストーリー
+  evidence: string // ④根拠・反例・仮説
+  action: string // ⑤今後の行動
+}
+
+export const NOTE_KEYS: (keyof NoteFields)[] = ['content', 'insight', 'story', 'evidence', 'action']
+
+export const EMPTY_FIELDS: NoteFields = { content: '', insight: '', story: '', evidence: '', action: '' }
+
+/** 1日1件。平文・端末内のみ(日曜に読み返すのが機能なので暗号化しない §14.6) */
+export interface Note {
+  date: string // YYYY-MM-DD(キー)
+  fields: NoteFields
+  evidenceKind: EvidenceKind | null
+  /** この日の①の上に添えられていた前日の仮説 */
+  hypothesisFrom: string | null
+  durationSec: number
+  createdAt: number
+}
+
+export interface NoteDraft {
+  date: string
+  step: number
+  fields: NoteFields
+  evidenceKind: EvidenceKind | null
+  hypothesisFrom: string | null
+  visibleMs: number
+  stepMs: number
+}
+
+/** v1の下書き(起動時の遡及確定にのみ使う) */
 export interface Draft {
   date: string
   question: string
@@ -81,16 +120,12 @@ export interface Draft {
   emotionWord: string
   pauses: number
   visibleMs: number
-  /** 問いガイド(dig)進行中: 現在のステップ(0-4) */
   digStep?: number
-  /** 問いガイド: 1問目の回答(完了判定 §7.1 はこれで行う — textにはQ行が混ざるため) */
   digFirstAnswer?: string
-  /** インボックス由来の問いを使った場合のid(完了時に消費) */
   inboxId?: number
   heavyDay?: boolean
 }
 
-/** 書き足し(判定に影響しない同日2本目)の下書き。settleStaleDraftの遡及完了対象外 */
 export interface BonusDraft {
   date: string
   text: string
@@ -102,23 +137,26 @@ export interface Settings {
   ifThenText: string
   notifyTime: string // "HH:MM"
   donePhrase: string
-  addresseeTemplate: string
-  drainSeconds: number
+  /** 1日の持ち時間(分)。声の60秒を含む。既定15 */
+  sessionMinutes: number
   unlockAll: boolean
   unlockedStages: number[]
   completedSessions: number
   lastSessionDate: string | null
-  carryQuestion: string | null
-  backspaceHintShown: boolean
+  /** 前日の④が仮説だったとき、翌日の①の上に添える(消費したらnull) */
+  carryHypothesis: string | null
   lastBackupAt: number | null
-  usedQuestionIds: number[]
   closeTalk: { month: string; count: number }
-  /** 月替わりで消える前月分の声出し回数(定点観測でのみ表示 §3.6) */
   closeTalkPrev: { month: string; count: number }
   reminderGuideShown: boolean
   notifiedOn: string | null
   backupNudgeMonth: string
-  /** 重い日モードの主語用(任意。未設定なら汎用文言) */
+  // ---- v1互換(読み出しのみ。UIからは消えた) ----
+  addresseeTemplate: string
+  drainSeconds: number
+  carryQuestion: string | null
+  backspaceHintShown: boolean
+  usedQuestionIds: number[]
   userName: string
 }
 
@@ -127,20 +165,22 @@ export const DEFAULT_SETTINGS: Settings = {
   ifThenText: '',
   notifyTime: '21:00',
   donePhrase: '水路、通った',
-  addresseeTemplate: '10年後のおれへ ─ ',
-  drainSeconds: 150,
+  sessionMinutes: 15,
   unlockAll: false,
   unlockedStages: [],
   completedSessions: 0,
   lastSessionDate: null,
-  carryQuestion: null,
-  backspaceHintShown: false,
+  carryHypothesis: null,
   lastBackupAt: null,
-  usedQuestionIds: [],
   closeTalk: { month: '', count: 0 },
   closeTalkPrev: { month: '', count: 0 },
   reminderGuideShown: false,
   notifiedOn: null,
   backupNudgeMonth: '',
+  addresseeTemplate: '',
+  drainSeconds: 150,
+  carryQuestion: null,
+  backspaceHintShown: false,
+  usedQuestionIds: [],
   userName: '',
 }

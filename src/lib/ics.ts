@@ -22,7 +22,7 @@ export function downloadIcs(time: string): void {
     'UID:suiro-daily@local',
     `DTSTAMP:${fmt(new Date())}`,
     `DTSTART:${fmt(start)}`,
-    'DURATION:PT5M',
+    'DURATION:PT15M',
     'RRULE:FREQ=DAILY',
     `SUMMARY:${COPY.reminderFixed}`,
     'BEGIN:VALARM',

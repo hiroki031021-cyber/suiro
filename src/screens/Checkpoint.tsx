@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { InlineHint } from '../components/ui'
 import { COPY } from '../lib/copy'
 import type { CheckpointRecord } from '../lib/types'
 
 interface Props {
   history: CheckpointRecord[] // 過去分(今月を含まない)
   prevTalkCount: number | null // 先月の声出し回数
+  /** 月ごとの仮説率(§14.5)。キーはYYYY-MM */
+  hypo: Record<string, { h: number; n: number }>
+  thisMonth: string
   /** 録音済み・3指標未入力のまま中断した月の再入場(プロセス破棄対策) */
   resume: { audio?: ArrayBuffer; mimeType?: string } | null
   onRecorded: (audio: ArrayBuffer | null, mimeType: string | null) => Promise<void> // 録音完了=その日の完了(§7.1)
@@ -21,7 +25,7 @@ function pickMime(): string | null {
 }
 
 /** 月1・第1日曜の定点観測(§3.6)。録音失敗時はタイマーのみのフォールバックで完了できる */
-export function Checkpoint({ history, prevTalkCount, resume, onRecorded, onSaveMetrics, onExit }: Props) {
+export function Checkpoint({ history, prevTalkCount, hypo, thisMonth, resume, onRecorded, onSaveMetrics, onExit }: Props) {
   const [phase, setPhase] = useState<'intro' | 'recording' | 'count' | 'done'>(resume ? 'count' : 'intro')
   const [seconds, setSeconds] = useState(60)
   const [audioUrl, setAudioUrl] = useState<string | null>(() => {
@@ -178,6 +182,9 @@ export function Checkpoint({ history, prevTalkCount, resume, onRecorded, onSaveM
       {phase === 'done' && (
         <>
           {prevTalkCount !== null && <p class="hint-static">{COPY.ckPrevTalk(prevTalkCount)}</p>}
+          {hypo[thisMonth] && (
+            <InlineHint text={`今月の${COPY.ckHypo(hypo[thisMonth].h, hypo[thisMonth].n)}`} why={COPY.ckHypoWhy} />
+          )}
           {history.length > 0 && (
             <div class="ck-history">
               {history.map((h) => (
@@ -186,6 +193,7 @@ export function Checkpoint({ history, prevTalkCount, resume, onRecorded, onSaveM
                   <span>語数 {h.wordCount ?? '—'}</span>
                   <span>えー・あの {h.fillerCount ?? '—'}</span>
                   <span>沈黙 {h.silenceCount ?? '—'}</span>
+                  {hypo[h.month] && <span>{COPY.ckHypo(hypo[h.month].h, hypo[h.month].n)}</span>}
                 </div>
               ))}
             </div>

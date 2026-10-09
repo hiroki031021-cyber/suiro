@@ -1,7 +1,7 @@
 {
   "name": "水路",
   "short_name": "水路",
-  "description": "1日5分、言葉の水路を通す",
+  "description": "1日15分、五つの段で考える",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
