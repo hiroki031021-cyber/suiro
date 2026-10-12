@@ -8,6 +8,8 @@ interface Props {
   prevTalkCount: number | null // 先月の声出し回数
   /** 月ごとの仮説率(§14.5)。キーはYYYY-MM */
   hypo: Record<string, { h: number; n: number }>
+  /** 月ごとのずれ日数(§14.11) */
+  gaps: Record<string, { g: number; n: number }>
   thisMonth: string
   /** 録音済み・3指標未入力のまま中断した月の再入場(プロセス破棄対策) */
   resume: { audio?: ArrayBuffer; mimeType?: string } | null
@@ -25,7 +27,7 @@ function pickMime(): string | null {
 }
 
 /** 月1・第1日曜の定点観測(§3.6)。録音失敗時はタイマーのみのフォールバックで完了できる */
-export function Checkpoint({ history, prevTalkCount, hypo, thisMonth, resume, onRecorded, onSaveMetrics, onExit }: Props) {
+export function Checkpoint({ history, prevTalkCount, hypo, gaps, thisMonth, resume, onRecorded, onSaveMetrics, onExit }: Props) {
   const [phase, setPhase] = useState<'intro' | 'recording' | 'count' | 'done'>(resume ? 'count' : 'intro')
   const [seconds, setSeconds] = useState(60)
   const [audioUrl, setAudioUrl] = useState<string | null>(() => {
@@ -185,6 +187,9 @@ export function Checkpoint({ history, prevTalkCount, hypo, thisMonth, resume, on
           {hypo[thisMonth] && (
             <InlineHint text={`今月の${COPY.ckHypo(hypo[thisMonth].h, hypo[thisMonth].n)}`} why={COPY.ckHypoWhy} />
           )}
+          {gaps[thisMonth] && (
+            <InlineHint text={`今月の${COPY.ckGaps(gaps[thisMonth].g, gaps[thisMonth].n)}`} why={COPY.ckGapsWhy} />
+          )}
           {history.length > 0 && (
             <div class="ck-history">
               {history.map((h) => (
@@ -194,6 +199,7 @@ export function Checkpoint({ history, prevTalkCount, hypo, thisMonth, resume, on
                   <span>えー・あの {h.fillerCount ?? '—'}</span>
                   <span>沈黙 {h.silenceCount ?? '—'}</span>
                   {hypo[h.month] && <span>{COPY.ckHypo(hypo[h.month].h, hypo[h.month].n)}</span>}
+                  {gaps[h.month] && <span>{COPY.ckGaps(gaps[h.month].g, gaps[h.month].n)}</span>}
                 </div>
               ))}
             </div>

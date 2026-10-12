@@ -91,6 +91,17 @@ export const NOTE_KEYS: (keyof NoteFields)[] = ['content', 'insight', 'story', '
 
 export const EMPTY_FIELDS: NoteFields = { content: '', insight: '', story: '', evidence: '', action: '' }
 
+/** つなぎ(§14.11): ②を中心に3つの対がつながっているかの自己判定 */
+export type LinkState = 'ok' | 'gap'
+export interface NoteLinks {
+  s23: LinkState | null // ③は②の実例か
+  s24: LinkState | null // ④の主語を自分に戻すと②になるか
+  s45: LinkState | null // ④が本当なら⑤は自然か
+}
+export const EMPTY_LINKS: NoteLinks = { s23: null, s24: null, s45: null }
+export const hasGap = (l: NoteLinks | undefined | null) => !!l && Object.values(l).some((v) => v === 'gap')
+export const linksAnswered = (l: NoteLinks | undefined | null) => !!l && Object.values(l).every((v) => v !== null)
+
 /** 1日1件。平文・端末内のみ(日曜に読み返すのが機能なので暗号化しない §14.6) */
 export interface Note {
   date: string // YYYY-MM-DD(キー)
@@ -98,6 +109,8 @@ export interface Note {
   evidenceKind: EvidenceKind | null
   /** この日の①の上に添えられていた前日の仮説 */
   hypothesisFrom: string | null
+  /** つなぎの判定(①②だけの日・途中終了の日はundefined) */
+  links?: NoteLinks
   durationSec: number
   createdAt: number
 }
@@ -108,6 +121,7 @@ export interface NoteDraft {
   fields: NoteFields
   evidenceKind: EvidenceKind | null
   hypothesisFrom: string | null
+  links?: NoteLinks
   visibleMs: number
   stepMs: number
 }

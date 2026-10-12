@@ -5,12 +5,22 @@ import { COPY } from '../lib/copy'
 import { meetsCompletion } from '../lib/metrics'
 import { noteComplete, saveNoteDraft } from '../lib/store'
 import { todayStr } from '../lib/clock'
-import { NOTE_KEYS, type EvidenceKind, type NoteFields, type Settings } from '../lib/types'
+import {
+  NOTE_KEYS,
+  hasGap,
+  linksAnswered,
+  type EvidenceKind,
+  type LinkState,
+  type NoteFields,
+  type NoteLinks,
+  type Settings,
+} from '../lib/types'
 
 export interface SessionNoteResult {
   fields: NoteFields
   evidenceKind: EvidenceKind | null
   hypothesisFrom: string | null
+  links: NoteLinks
   durationSec: number
   /** ヘッダの「今日はここまで」で終えた(5秒の取り消しトーストを出す) */
   early: boolean
@@ -23,6 +33,7 @@ interface Props {
   initialStep: number
   initialFields: NoteFields
   initialKind: EvidenceKind | null
+  initialLinks: NoteLinks
   initialVisibleMs: number
   initialStepMs: number
   showDiffHint: boolean // 第2段階
@@ -32,18 +43,21 @@ interface Props {
   onSettings: () => void
 }
 
-/** 各段の配分(分)。合計14。持ち時間(声の60秒を除く)に比例して伸縮する(§14.2) */
-const STEP_MINUTES = [1, 4, 3, 4, 2]
+/** 各段の配分(分)。①〜⑤+つなぎで合計14。持ち時間(声の60秒を除く)に比例して伸縮する(§14.2) */
+const STEP_MINUTES = [1, 4, 3, 4, 1, 1]
+const LINK_STEP = 5
+const CIRCLED = ['①', '②', '③', '④', '⑤']
 
-/** 五つの段(§14.2): 1段1画面・前進のみ・項目内の言い直しは自由 */
+/** 五つの段(§14.2)+つなぎ(§14.11): 1段1画面・前進のみ・項目内の言い直しは自由 */
 export function SessionNote(props: Props) {
-  const stepCount = props.minimal ? 2 : 5
+  const stepCount = props.minimal ? 2 : 6
   const writingMin = Math.max(5, props.settings.sessionMinutes - 1)
   const stepMs = (i: number) => (STEP_MINUTES[i] * writingMin * 60000) / 14
 
   const [step, setStep] = useState(Math.min(props.initialStep, stepCount - 1))
   const [fields, setFields] = useState<NoteFields>(props.initialFields)
   const [kind, setKind] = useState<EvidenceKind | null>(props.initialKind)
+  const [links, setLinks] = useState<NoteLinks>(props.initialLinks)
   const [progress, setProgress] = useState(props.initialStepMs / stepMs(props.initialStep))
   const [ended, setEnded] = useState(props.initialStepMs >= stepMs(props.initialStep))
   const [hint, setHint] = useState<{ text: string; why?: string } | null>(null)
@@ -51,22 +65,25 @@ export function SessionNote(props: Props) {
   const stepRef = useRef(step)
   const fieldsRef = useRef(fields)
   const kindRef = useRef(kind)
+  const linksRef = useRef(links)
   const visibleMs = useRef(props.initialVisibleMs)
   const curStepMs = useRef(props.initialStepMs)
   const saveTimer = useRef<number | null>(null)
   const finished = useRef(false)
 
+  const draft = () => ({
+    date: todayStr(),
+    step: stepRef.current,
+    fields: fieldsRef.current,
+    evidenceKind: kindRef.current,
+    hypothesisFrom: props.hypothesisFrom,
+    links: linksRef.current,
+    visibleMs: visibleMs.current,
+    stepMs: curStepMs.current,
+  })
   const persistDraft = () => {
     if (finished.current) return
-    void saveNoteDraft({
-      date: todayStr(),
-      step: stepRef.current,
-      fields: fieldsRef.current,
-      evidenceKind: kindRef.current,
-      hypothesisFrom: props.hypothesisFrom,
-      visibleMs: visibleMs.current,
-      stepMs: curStepMs.current,
-    })
+    void saveNoteDraft(draft())
   }
   const schedulePersist = () => {
     if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -93,10 +110,12 @@ export function SessionNote(props: Props) {
     }
   }, [])
 
-  const key = NOTE_KEYS[step]
+  const isLink = step === LINK_STEP
+  const key = NOTE_KEYS[Math.min(step, 4)]
   const value = fields[key]
 
   const canAdvance = (() => {
+    if (isLink) return linksAnswered(links)
     if (step === 1) return meetsCompletion(value)
     if (step === 3 && props.showTags && kind === null) return false
     return value.trim().length > 0
@@ -107,19 +126,12 @@ export function SessionNote(props: Props) {
     finished.current = true
     if (saveTimer.current) clearTimeout(saveTimer.current)
     // ヘッダ終了の取り消しに備え、下書きは残す(確定時にapp側で消す)
-    void saveNoteDraft({
-      date: todayStr(),
-      step: stepRef.current,
-      fields: fieldsRef.current,
-      evidenceKind: kindRef.current,
-      hypothesisFrom: props.hypothesisFrom,
-      visibleMs: visibleMs.current,
-      stepMs: curStepMs.current,
-    })
+    void saveNoteDraft(draft())
     props.onFinish({
       fields: fieldsRef.current,
       evidenceKind: kindRef.current,
       hypothesisFrom: props.hypothesisFrom,
+      links: linksRef.current,
       durationSec: Math.round(visibleMs.current / 1000),
       early,
     })
@@ -166,14 +178,24 @@ export function SessionNote(props: Props) {
     schedulePersist()
   }
 
-  const def = COPY.steps[step]
-  const circled = ['①', '②', '③', '④', '⑤'][step]
+  const setLink = (k: keyof NoteLinks, v: LinkState) => {
+    const nl = { ...linksRef.current, [k]: v }
+    linksRef.current = nl
+    setLinks(nl)
+    if (hasGap(nl)) setHint({ text: COPY.gapNote, why: COPY.gapNoteWhy })
+    else setHint(null)
+    schedulePersist()
+  }
+
+  const label = isLink ? COPY.linkLabel : COPY.steps[step].label
+  const question = isLink ? COPY.linkQ : COPY.steps[step].q
+  const fieldAt = (i: number) => fields[NOTE_KEYS[i]]
 
   return (
     <div class="screen">
       <header class="bar">
         <span class="mode-label">
-          {def.label} {step + 1}/{stepCount}
+          {label} {step + 1}/{stepCount}
         </span>
         <div class="bar-right">
           <button class="ghost icon" onClick={props.onSettings} aria-label="設定">
@@ -195,8 +217,16 @@ export function SessionNote(props: Props) {
         ))}
       </div>
 
+      {/* ③④⑤は②を見ながら書く(ずれの予防 §14.11) */}
+      {step >= 2 && step <= 4 && (
+        <div class="anchor">
+          <span class="circled">②</span>
+          <span class="anchor-text">{fields.insight}</span>
+        </div>
+      )}
+
       <div class="question">
-        <span class="circled">{circled}</span> {def.q}
+        {!isLink && <span class="circled">{CIRCLED[step]}</span>} {question}
       </div>
 
       {step === 1 && props.showDiffHint && <InlineHint text={COPY.diffHint} why={COPY.diffHintWhy} />}
@@ -218,7 +248,35 @@ export function SessionNote(props: Props) {
         </div>
       )}
 
-      <PlainEditor key={step} initial={value} placeholder={def.ph} onChange={setField} autoFocus={step > 0} />
+      {isLink ? (
+        <div class="link-list">
+          {COPY.linkPairs.map((p) => (
+            <div key={p.key} class="link-pair">
+              <div class="link-texts">
+                <p>
+                  <span class="circled">{CIRCLED[p.a]}</span>
+                  {fieldAt(p.a)}
+                </p>
+                <p>
+                  <span class="circled">{CIRCLED[p.b]}</span>
+                  {fieldAt(p.b)}
+                </p>
+              </div>
+              <div class="link-test">{p.test}</div>
+              <div class="tag-row">
+                <button class={`chip ${links[p.key] === 'ok' ? 'on' : ''}`} onClick={() => setLink(p.key, 'ok')}>
+                  {COPY.linkOk}
+                </button>
+                <button class={`chip ${links[p.key] === 'gap' ? 'on gap' : ''}`} onClick={() => setLink(p.key, 'gap')}>
+                  {COPY.linkGap}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <PlainEditor key={step} initial={value} placeholder={COPY.steps[step].ph} onChange={setField} autoFocus={step > 0} />
+      )}
 
       <div class="timer-row">
         <TimerRing progress={progress} />

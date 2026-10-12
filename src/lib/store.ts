@@ -13,9 +13,10 @@ import type {
   Note,
   NoteDraft,
   NoteFields,
+  NoteLinks,
   Settings,
 } from './types'
-import { DEFAULT_SETTINGS, EMPTY_FIELDS } from './types'
+import { DEFAULT_SETTINGS, EMPTY_FIELDS, hasGap, linksAnswered } from './types'
 
 // ---------- settings ----------
 
@@ -43,7 +44,8 @@ export async function commitNote(
   fields: NoteFields,
   evidenceKind: EvidenceKind | null,
   hypothesisFrom: string | null,
-  durationSec: number
+  durationSec: number,
+  links: NoteLinks | undefined = undefined
 ): Promise<void> {
   const existing = await getNote(date)
   const trimmed: NoteFields = { ...EMPTY_FIELDS }
@@ -53,6 +55,7 @@ export async function commitNote(
     fields: trimmed,
     evidenceKind: trimmed.evidence ? evidenceKind : null,
     hypothesisFrom,
+    links: linksAnswered(links) ? links : undefined,
     durationSec,
     createdAt: existing?.createdAt ?? Date.now(),
   } satisfies Note)
@@ -83,6 +86,19 @@ export async function hypothesisStats(): Promise<Record<string, { h: number; n: 
   return out
 }
 
+/** 月ごとのずれ日数(§14.11): つなぎに答えた日のうち、一つでも「ずれ」があった日 */
+export async function gapStats(): Promise<Record<string, { g: number; n: number }>> {
+  const out: Record<string, { g: number; n: number }> = {}
+  for (const n of await listNotes()) {
+    if (!n.links) continue
+    const m = n.date.slice(0, 7)
+    out[m] = out[m] ?? { g: 0, n: 0 }
+    out[m].n++
+    if (hasGap(n.links)) out[m].g++
+  }
+  return out
+}
+
 /**
  * 日付をまたいだ書きかけは自動保存(§2.1と同じ思想)。
  * 完了条件を満たしていればその日を完了扱いに遡及し、仮説の持ち越しも行う。
@@ -92,7 +108,7 @@ export async function settleStaleNoteDraft(s: Settings): Promise<Settings> {
   if (!d || d.date === todayStr()) return s
   const hasText = Object.values(d.fields).some((v) => v.trim().length > 0)
   if (hasText) {
-    await commitNote(d.date, d.fields, d.evidenceKind, d.hypothesisFrom, Math.round(d.visibleMs / 1000))
+    await commitNote(d.date, d.fields, d.evidenceKind, d.hypothesisFrom, Math.round(d.visibleMs / 1000), d.links)
     if (noteComplete(d.fields)) {
       const existing = await dbGet<DayRecord>('days', d.date)
       if (!existing) {
@@ -126,6 +142,9 @@ export function notesToMarkdown(notes: Note[]): string {
         `## ③ 自分のストーリー\n${n.fields.story}`,
         `## ④ ${kind(n.evidenceKind)}\n${n.fields.evidence}`,
         `## ⑤ 今後の行動\n${n.fields.action}`,
+        n.links
+          ? `つなぎ: ②→③ ${n.links.s23 === 'gap' ? 'ずれ' : '○'} / ②→④ ${n.links.s24 === 'gap' ? 'ずれ' : '○'} / ④→⑤ ${n.links.s45 === 'gap' ? 'ずれ' : '○'}`
+          : '',
       ]
         .filter((x) => x !== '')
         .join('\n\n')

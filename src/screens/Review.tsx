@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { CapsuleCard } from '../components/CapsuleCard'
 import { COPY } from '../lib/copy'
 import type { CapsuleWeek, OpenedCapsule } from '../lib/store'
-import type { Note } from '../lib/types'
+import { hasGap, type Note } from '../lib/types'
 
 interface Props {
   notes: Note[] // 今週分(日付順)
@@ -81,6 +81,7 @@ export function Review({ notes, capsule, onPick, onTalked, onOpenCapsule, onDisc
                 <button class="insight-btn" onClick={() => pick(n)} disabled={!!picked}>
                   <span class="s-date">{dow}</span>
                   <span class="insight-text">{n.fields.insight}</span>
+                  {hasGap(n.links) && <span class="kind-tag gap">{COPY.reviewGapTag}</span>}
                 </button>
               </li>
             )
@@ -101,7 +102,10 @@ export function Review({ notes, capsule, onPick, onTalked, onOpenCapsule, onDisc
           {picked.fields.story && (
             <div class="note-row">
               <span class="circled">③</span>
-              <p>{picked.fields.story}</p>
+              <p>
+                {picked.links?.s23 === 'gap' && <span class="kind-tag gap">{COPY.reviewGapTag}</span>}
+                {picked.fields.story}
+              </p>
             </div>
           )}
           {picked.fields.evidence && (
@@ -109,6 +113,7 @@ export function Review({ notes, capsule, onPick, onTalked, onOpenCapsule, onDisc
               <span class="circled">④</span>
               <p>
                 <span class="kind-tag">{kindLabel(picked.evidenceKind)}</span>
+                {picked.links?.s24 === 'gap' && <span class="kind-tag gap">{COPY.reviewGapTag}</span>}
                 {picked.fields.evidence}
               </p>
             </div>
@@ -116,7 +121,10 @@ export function Review({ notes, capsule, onPick, onTalked, onOpenCapsule, onDisc
           {picked.fields.action && (
             <div class="note-row">
               <span class="circled">⑤</span>
-              <p>{picked.fields.action}</p>
+              <p>
+                {picked.links?.s45 === 'gap' && <span class="kind-tag gap">{COPY.reviewGapTag}</span>}
+                {picked.fields.action}
+              </p>
             </div>
           )}
 

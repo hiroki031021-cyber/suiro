@@ -13,6 +13,7 @@ import {
   arrivedCapsule,
   clearNoteDraft,
   commitNote,
+  gapStats,
   getCheckpoint,
   hypothesisStats,
   listCheckpoints,
@@ -29,7 +30,17 @@ import {
 } from './lib/store'
 import { countWeekCompletions, planToday, recordCompletion, stageUnlocked, weekDots } from './lib/schedule'
 import type { CoachCard } from './data/coachCards'
-import { EMPTY_FIELDS, type CheckpointRecord, type DayRecord, type EvidenceKind, type Note, type NoteFields, type Settings } from './lib/types'
+import {
+  EMPTY_FIELDS,
+  EMPTY_LINKS,
+  type CheckpointRecord,
+  type DayRecord,
+  type EvidenceKind,
+  type Note,
+  type NoteFields,
+  type NoteLinks,
+  type Settings,
+} from './lib/types'
 
 type View =
   | { v: 'loading' }
@@ -42,6 +53,7 @@ type View =
       initialStep: number
       initialFields: NoteFields
       initialKind: EvidenceKind | null
+      initialLinks: NoteLinks
       initialVisibleMs: number
       initialStepMs: number
     }
@@ -62,6 +74,7 @@ export function App() {
   const [ckHistory, setCkHistory] = useState<CheckpointRecord[]>([])
   const [ckPrevTalk, setCkPrevTalk] = useState<number | null>(null)
   const [ckHypo, setCkHypo] = useState<Record<string, { h: number; n: number }>>({})
+  const [ckGaps, setCkGaps] = useState<Record<string, { g: number; n: number }>>({})
   const [ckResume, setCkResume] = useState<{ audio?: ArrayBuffer; mimeType?: string } | null>(null)
 
   const prevView = useRef<View>({ v: 'loading' })
@@ -158,6 +171,7 @@ export function App() {
       initialStep: sameDay?.step ?? 0,
       initialFields: sameDay?.fields ?? EMPTY_FIELDS,
       initialKind: sameDay?.evidenceKind ?? null,
+      initialLinks: sameDay?.links ?? EMPTY_LINKS,
       initialVisibleMs: sameDay?.visibleMs ?? 0,
       initialStepMs: sameDay?.stepMs ?? 0,
     })
@@ -172,6 +186,7 @@ export function App() {
     setCkPrevTalk(prev)
     setCkHistory((await listCheckpoints()).filter((c) => c.month !== monthStr()))
     setCkHypo(await hypothesisStats())
+    setCkGaps(await gapStats())
     setCkResume(resume)
     setView({ v: 'checkpoint' })
   }
@@ -205,7 +220,7 @@ export function App() {
     finalizing.current = true
     try {
       const s = settingsRef.current!
-      await commitNote(todayStr(), r.fields, r.evidenceKind, r.hypothesisFrom, r.durationSec)
+      await commitNote(todayStr(), r.fields, r.evidenceKind, r.hypothesisFrom, r.durationSec, r.links)
       const hyp = r.evidenceKind === 'hypothesis' && r.fields.evidence.trim() ? r.fields.evidence.trim() : null
       const res = await recordCompletion(s, 'note', hyp)
       await updateSettings(res.settings)
@@ -365,6 +380,7 @@ export function App() {
           initialStep={view.initialStep}
           initialFields={view.initialFields}
           initialKind={view.initialKind}
+          initialLinks={view.initialLinks}
           initialVisibleMs={view.initialVisibleMs}
           initialStepMs={view.initialStepMs}
           showDiffHint={stageUnlocked(settings, 2)}
@@ -417,6 +433,7 @@ export function App() {
           history={ckHistory}
           prevTalkCount={ckPrevTalk}
           hypo={ckHypo}
+          gaps={ckGaps}
           thisMonth={monthStr()}
           resume={ckResume}
           onRecorded={ckRecorded}
