@@ -1,13 +1,14 @@
 // 水路 service worker — installでコアをプリキャッシュ+ネットワーク優先/キャッシュフォールバック
 // パスはすべてSWのスコープ相対(GitHub Pagesのサブパス配信に対応)
-const CACHE = 'suiro-v9'
+const CACHE = 'suiro-v10'
 const CORE = ['./', './manifest.webmanifest', './icon.svg', './icon-512.png', './apple-touch-icon.png']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE)
-      await cache.addAll(CORE)
+      // プリキャッシュはHTTPキャッシュを通さない(古いindexを新しいキャッシュ名で抱え込まない)
+      await Promise.all(CORE.map((u) => cache.add(new Request(u, { cache: 'reload' }))))
       try {
         // index.htmlが参照するハッシュ付きアセット(JS/CSS)もプリキャッシュする
         const res = await cache.match('./')
@@ -38,6 +39,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url)
   if (e.request.method !== 'GET' || url.origin !== location.origin) return
+  // 更新検知用のversion.jsonはSWを素通し(常に最新)
+  if (url.pathname.endsWith('/version.json')) return
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE)

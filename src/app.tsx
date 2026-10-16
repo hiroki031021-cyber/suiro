@@ -54,6 +54,7 @@ export function App() {
   const [capsule, setCapsule] = useState<CapsuleWeek | null>(null)
   const [bag, setBag] = useState<MemoBagWeek | null>(null)
   const [toast, setToast] = useState(false)
+  const [updateReady, setUpdateReady] = useState(false)
   const [backupNudgeText, setBackupNudgeText] = useState<string | null>(null)
   const [ckHistory, setCkHistory] = useState<CheckpointRecord[]>([])
   const [ckPrevTalk, setCkPrevTalk] = useState<number | null>(null)
@@ -74,6 +75,13 @@ export function App() {
     setSettings(s)
     await saveSettings(s)
   }
+
+  // ---- 更新の通知(§15.12) ----
+  useEffect(() => {
+    const on = () => setUpdateReady(true)
+    window.addEventListener('suiro:update', on)
+    return () => window.removeEventListener('suiro:update', on)
+  }, [])
 
   // ---- 起動 ----
   const [fatal, setFatal] = useState(false)
@@ -422,6 +430,11 @@ export function App() {
       {toast && (
         <button class="undo-toast fade-in" onClick={() => void undoEarlyFinish()}>
           {COPY.undoToast}
+        </button>
+      )}
+      {updateReady && !toast && view.v !== 'note' && (
+        <button class="undo-toast update-toast fade-in" onClick={() => location.reload()}>
+          {COPY.updateReady}
         </button>
       )}
     </>

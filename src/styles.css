@@ -1096,3 +1096,11 @@ button {
   max-height: 260px;
   overflow: auto;
 }
+
+.update-toast {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: #fff;
+}

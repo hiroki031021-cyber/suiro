@@ -7,6 +7,7 @@ export const COPY = {
   noteNext: '次へ',
   noteFinish: '終わる',
   undoToast: '続きを書く',
+  updateReady: '新しい版がある。更新する',
 
   // ゼロ秒メモ(§15.2)
   memoLabel: 'メモ',

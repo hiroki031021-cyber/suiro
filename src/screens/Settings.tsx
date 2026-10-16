@@ -22,6 +22,7 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
   const [importPass, setImportPass] = useState('')
   const [persisted, setPersisted] = useState<boolean | null>(null)
   const [msg, setMsg] = useState('')
+  const [updMsg, setUpdMsg] = useState('')
 
   useEffect(() => {
     void listNotes().then(setNotes)
@@ -32,6 +33,37 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
   }, [])
 
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch })
+
+  /** 公開中の版と比べる(§15.12)。違えばSWを更新してから読み直す */
+  const checkUpdate = async () => {
+    try {
+      const r = await fetch(`${import.meta.env.BASE_URL}version.json?t=${Date.now()}`, { cache: 'no-store' })
+      const j = (await r.json()) as { version?: string }
+      if (!j.version) throw new Error()
+      if (j.version === __APP_VERSION__) {
+        setUpdMsg(`これが最新(${j.version})`)
+        return
+      }
+      setUpdMsg(`公開中は ${j.version}。更新して読み直す…`)
+      const reg = await navigator.serviceWorker?.getRegistration()
+      await reg?.update()
+      window.setTimeout(() => location.reload(), 1500)
+    } catch {
+      setUpdMsg('確認できなかった(オフライン?)')
+    }
+  }
+
+  /** 最終手段: SWとキャッシュを捨てて読み直す。IndexedDBのデータには触らない */
+  const hardRefresh = async () => {
+    try {
+      const regs = (await navigator.serviceWorker?.getRegistrations()) ?? []
+      for (const r of regs) await r.unregister()
+      for (const k of await caches.keys()) await caches.delete(k)
+    } catch {
+      /* 続行 */
+    }
+    location.reload()
+  }
 
   const doExport = async () => {
     if (!pass) {
@@ -226,6 +258,15 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
 
       <div class="section-label">診断</div>
       <p class="note">ビルド {__APP_VERSION__}</p>
+      <div class="row">
+        <button class="ghost" onClick={() => void checkUpdate()}>
+          更新を確認
+        </button>
+        <button class="ghost" onClick={() => void hardRefresh()}>
+          キャッシュを捨てて読み直す
+        </button>
+      </div>
+      {updMsg && <p class="note">{updMsg}</p>}
       <details class="card-details">
         <summary>入力の診断(メモで文字が打てないときに開く)</summary>
         <InputDiag />
