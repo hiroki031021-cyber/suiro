@@ -39,6 +39,12 @@ export const listNotes = async () =>
 
 export const memoHasBody = (m: Memo) => m.title.trim().length > 0 && m.lines.some((l) => l.trim().length > 0)
 
+/** 1枚のテキスト(1行目=題、2行目以降=本文)をMemoに。空行は本文から除く */
+export const memoFromText = (text: string): Memo => {
+  const [title = '', ...rest] = text.split('\n')
+  return { title: title.trim(), lines: rest.map((l) => l.trim()).filter(Boolean) }
+}
+
 /** 完了条件(§15.6): 題と本文1行のあるメモが1枚以上 */
 export const draftComplete = (memos: Memo[]) => memos.some(memoHasBody)
 
@@ -126,7 +132,7 @@ export async function settleStaleNoteDraft(s: Settings): Promise<Settings> {
     await clearNoteDraft()
     return s
   }
-  const memos = d.cur ? [...d.memos, { title: d.cur.title, lines: [...d.cur.lines, d.cur.line] }] : d.memos
+  const memos = d.cur && typeof d.cur.text === 'string' ? [...d.memos, memoFromText(d.cur.text)] : d.memos
   if (draftComplete(memos)) {
     await commitNote(d.date, {
       memos,

@@ -910,6 +910,35 @@ button {
   gap: 6px;
 }
 
+.memo-editor {
+  font-size: 16.5px;
+  line-height: 1.9;
+  min-height: 200px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.memo-editor:disabled {
+  opacity: 1;
+  -webkit-text-fill-color: var(--fg);
+  color: var(--fg);
+}
+
+.memo-editor::placeholder {
+  white-space: pre-line;
+}
+
+.memo-count {
+  font-size: 12px;
+  color: var(--fg-soft);
+  letter-spacing: 0.08em;
+}
+
+/* 注釈: iOSではキーボードが画面下を覆うため、操作列は本文の直下に置く(margin-top:autoにしない) */
+.timer-row.inline {
+  margin-top: 4px;
+}
+
 .memo-line {
   width: 100%;
   border: none;

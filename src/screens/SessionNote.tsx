@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { PlainEditor } from '../components/PlainEditor'
-import { StrictInput } from '../components/StrictInput'
+import { NonstopEditor, type EditorApi } from '../components/NonstopEditor'
 import { Hint, InlineHint, TimerRing } from '../components/ui'
 import { COPY } from '../lib/copy'
 import { TITLE_BANK } from '../data/titleBank'
-import { draftComplete, memoHasBody, saveNoteDraft, type NoteInput } from '../lib/store'
+import { draftComplete, memoFromText, memoHasBody, saveNoteDraft, type NoteInput } from '../lib/store'
 import { todayStr } from '../lib/clock'
 import {
   EMPTY_CONDITIONS,
@@ -39,7 +39,7 @@ interface Props {
 }
 
 const MEMO_MS = 60000 // ゼロ秒メモは原著どおり1分固定
-const MAX_LINES = 6
+const MAX_LINES = 7 // 題1行+本文6行
 const MEMO_COUNT = 5
 /** メモ以降の配分(分): イシュー2・空2・雨2.5・傘1.5・つなぎ1 = 9。持ち時間に比例して伸縮 */
 const PHASE_MINUTES: Record<Exclude<Phase, 'memo'>, number> = { issue: 2, sky: 2, rain: 2.5, umbrella: 1.5, links: 1 }
@@ -56,9 +56,7 @@ export function SessionNote(props: Props) {
 
   const [phase, setPhase] = useState<Phase>(d?.phase && phases.includes(d.phase) ? d.phase : 'memo')
   const [memos, setMemos] = useState<Memo[]>(d?.memos ?? [])
-  const [title, setTitle] = useState(d?.cur?.title ?? '')
-  const [lines, setLines] = useState<string[]>(d?.cur?.lines ?? [])
-  const [line, setLine] = useState(d?.cur?.line ?? '')
+  const [memoText, setMemoText] = useState(d?.cur && typeof d.cur.text === 'string' ? d.cur.text : '')
   const [memoMs, setMemoMs] = useState(d?.cur?.elapsedMs ?? 0)
   const [frozen, setFrozen] = useState((d?.cur?.elapsedMs ?? 0) >= MEMO_MS)
   const [issue, setIssue] = useState(d?.issue ?? '')
@@ -75,15 +73,14 @@ export function SessionNote(props: Props) {
   const [bankIdx, setBankIdx] = useState(() => Math.floor(Math.random() * TITLE_BANK.length))
 
   // タイマー・保存用に最新値をrefにも持つ(interval内のクロージャ対策)
-  const st = useRef({ phase, memos, title, lines, line, memoMs, frozen, issue, issueFromMemo, cond, sky, rain, umbrella, links })
-  st.current = { phase, memos, title, lines, line, memoMs, frozen, issue, issueFromMemo, cond, sky, rain, umbrella, links }
+  const st = useRef({ phase, memos, memoText, memoMs, frozen, issue, issueFromMemo, cond, sky, rain, umbrella, links })
+  st.current = { phase, memos, memoText, memoMs, frozen, issue, issueFromMemo, cond, sky, rain, umbrella, links }
   const visibleMs = useRef(d?.visibleMs ?? 0)
   const stepMs = useRef(d?.stepMs ?? 0)
   const memoStarted = useRef((d?.cur?.elapsedMs ?? 0) > 0)
   const saveTimer = useRef<number | null>(null)
   const finished = useRef(false)
-  const lineEl = useRef<HTMLInputElement | null>(null)
-  const titleEl = useRef<HTMLInputElement | null>(null)
+  const editor = useRef<EditorApi | null>(null)
   const deleteHintShown = useRef(false)
 
   const buildDraft = (): NoteDraft => {
@@ -92,7 +89,7 @@ export function SessionNote(props: Props) {
       date: todayStr(),
       phase: s.phase,
       memos: s.memos,
-      cur: s.phase === 'memo' ? { title: s.title, lines: s.lines, line: s.line, elapsedMs: s.memoMs } : null,
+      cur: s.phase === 'memo' ? { text: s.memoText, elapsedMs: s.memoMs } : null,
       issue: s.issue,
       issueFromMemo: s.issueFromMemo,
       conditions: s.cond,
@@ -127,8 +124,7 @@ export function SessionNote(props: Props) {
         if (next >= MEMO_MS) {
           setFrozen(true)
           setHint(null)
-          lineEl.current?.blur()
-          titleEl.current?.blur()
+          editor.current?.blur()
           persist()
         }
       } else {
@@ -151,8 +147,7 @@ export function SessionNote(props: Props) {
   // ---- 共通 ----
   const allMemos = (): Memo[] => {
     const s = st.current
-    const curLines = [...s.lines, ...(s.line.trim() ? [s.line] : [])]
-    const cur = s.title.trim() || curLines.length ? [{ title: s.title, lines: curLines }] : []
+    const cur = s.memoText.trim() ? [memoFromText(s.memoText)] : []
     return s.phase === 'memo' ? [...s.memos, ...cur] : s.memos
   }
   const complete = () => draftComplete(allMemos())
@@ -209,59 +204,37 @@ export function SessionNote(props: Props) {
       setHint({ text: COPY.memoStartHint, why: COPY.memoStartHintWhy })
     }
   }
-  const commitLine = () => {
-    const s = st.current
-    if (s.frozen) return
-    if (!s.line.trim()) return
-    if (s.lines.length >= MAX_LINES - 1) {
-      setLines([...s.lines, s.line])
-      setLine('')
-      setFrozen(true) // 6行で満了
-      persist()
-      return
-    }
-    setLines([...s.lines, s.line])
-    setLine('')
-    schedulePersist()
-  }
   const nextMemo = () => {
     const s = st.current
-    const m: Memo = { title: s.title, lines: [...s.lines, ...(s.line.trim() ? [s.line] : [])] }
-    const nm = [...s.memos, m]
+    const nm = [...s.memos, memoFromText(s.memoText)]
     st.current.memos = nm
+    st.current.memoText = ''
     setMemos(nm)
-    setTitle('')
-    setLines([])
-    setLine('')
+    setMemoText('')
     setMemoMs(0)
     setProgress(0)
     setFrozen(false)
     memoStarted.current = false
     setBankIdx((i) => (i + 1) % TITLE_BANK.length)
     if (nm.length >= memoTotal) {
-      st.current.title = ''
-      st.current.lines = []
-      st.current.line = ''
       if (phases.length === 1) finish(false)
       else nextPhase()
     } else {
       persist()
     }
   }
-  const giveTitle = () => {
-    if (st.current.frozen || st.current.title.trim()) return
-    setTitle(TITLE_BANK[bankIdx])
-    setBankIdx((i) => (i + 1) % TITLE_BANK.length)
+  const setTitleText = (t: string) => {
+    if (st.current.frozen || st.current.memoText.trim()) return
+    if (!editor.current?.setValue(t + '\n')) return
     startMemoClock()
-    schedulePersist()
-    lineEl.current?.focus()
+    editor.current.focus()
+  }
+  const giveTitle = () => {
+    setTitleText(TITLE_BANK[bankIdx])
+    setBankIdx((i) => (i + 1) % TITLE_BANK.length)
   }
   const useCarry = () => {
-    if (!props.issueFrom || st.current.frozen || st.current.title.trim()) return
-    setTitle(props.issueFrom)
-    startMemoClock()
-    schedulePersist()
-    lineEl.current?.focus()
+    if (props.issueFrom) setTitleText(props.issueFrom)
   }
   const blockedDelete = () => {
     if (!deleteHintShown.current) {
@@ -353,57 +326,40 @@ export function SessionNote(props: Props) {
       {/* ---- メモ ---- */}
       {phase === 'memo' && (
         <>
-          {memos.length === 0 && props.issueFrom && !title.trim() && !frozen && (
+          {memos.length === 0 && props.issueFrom && !memoText.trim() && !frozen && (
             <button class="carry-line carry-btn" onClick={useCarry}>
               {COPY.carryLine(props.issueFrom)}
               <span class="carry-use">{COPY.carryUse}</span>
             </button>
           )}
           <div class="memo-sheet">
-            <StrictInput
-              key={`t${memos.length}`}
-              value={title}
-              placeholder={COPY.memoTitlePh}
+            <NonstopEditor
+              key={`m${memos.length}`}
+              initial={memoText}
+              placeholder={COPY.memoPh}
+              maxLines={MAX_LINES}
               disabled={frozen}
-              autoFocus={!title}
-              register={(el) => (titleEl.current = el)}
+              register={(a) => {
+                editor.current = a
+              }}
               onChange={(v) => {
-                startMemoClock()
-                setTitle(v)
+                if (v.trim()) startMemoClock()
+                st.current.memoText = v
+                setMemoText(v)
                 schedulePersist()
               }}
-              onEnter={() => lineEl.current?.focus()}
               onBlockedDelete={blockedDelete}
               onBlockedPaste={() => setHint({ text: COPY.memoPaste })}
+              onLineLimit={() => setHint({ text: COPY.memoLineLimit })}
             />
-            <ol class="memo-lines">
-              {lines.map((l, i) => (
-                <li key={i}>{l}</li>
-              ))}
-              {!frozen && lines.length < MAX_LINES && (
-                <li class="memo-current">
-                  <StrictInput
-                    key={`l${memos.length}-${lines.length}`}
-                    value={line}
-                    placeholder={COPY.memoLinePh(lines.length)}
-                    disabled={frozen}
-                    register={(el) => (lineEl.current = el)}
-                    onChange={(v) => {
-                      startMemoClock()
-                      setLine(v)
-                      schedulePersist()
-                    }}
-                    onEnter={commitLine}
-                    onBlockedDelete={blockedDelete}
-                    onBlockedPaste={() => setHint({ text: COPY.memoPaste })}
-                  />
-                </li>
-              )}
-            </ol>
+            <div class="memo-count">
+              {Math.max(0, memoText.split('\n').length - 1)}/{MAX_LINES - 1}行
+            </div>
           </div>
-          <div class="timer-row">
+          {/* 操作列は本文の直下(iOSのキーボードに隠れない位置) */}
+          <div class="timer-row inline">
             <TimerRing progress={progress} />
-            {!frozen && !title.trim() && (
+            {!frozen && !memoText.trim() && (
               <button class="ghost" onClick={giveTitle}>
                 {COPY.memoGetTitle}
               </button>
@@ -411,7 +367,7 @@ export function SessionNote(props: Props) {
             {frozen && (
               <>
                 <span class="end-line fade-in">{memos.length + 1 >= memoTotal ? COPY.memoFrozenLast : COPY.memoFrozen}</span>
-                <button class="primary push-right" disabled={!memoHasBody({ title, lines: [...lines, line] })} onClick={nextMemo}>
+                <button class="primary push-right" disabled={!memoHasBody(memoFromText(memoText))} onClick={nextMemo}>
                   {memos.length + 1 >= memoTotal ? (phases.length === 1 ? COPY.noteFinish : COPY.memoToIssue) : COPY.memoNext}
                 </button>
               </>
@@ -572,7 +528,7 @@ export function SessionNote(props: Props) {
       )}
 
       {phase !== 'memo' && (
-        <div class="timer-row">
+        <div class="timer-row inline">
           <TimerRing progress={progress} />
           {ended && <span class="end-line fade-in">{COPY.timerEnd}</span>}
           <button class="primary push-right" disabled={!canAdvance} onClick={nextPhase}>

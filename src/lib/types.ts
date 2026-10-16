@@ -146,8 +146,8 @@ export interface NoteDraft {
   date: string
   phase: Phase
   memos: Memo[] // 凍結済みのメモ
-  /** 書きかけのメモ(タイトル・確定行・現在行)。memoの段のみ */
-  cur: { title: string; lines: string[]; line: string; elapsedMs: number } | null
+  /** 書きかけのメモ(1行目=題、2行目以降=本文)。memoの段のみ */
+  cur: { text: string; elapsedMs: number } | null
   issue: string
   issueFromMemo: number | null
   conditions: IssueConditions
