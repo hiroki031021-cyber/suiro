@@ -1,7 +1,7 @@
 {
   "name": "水路",
   "short_name": "水路",
-  "description": "1日15分、五つの段で考える",
+  "description": "1日15分、メモ5枚からイシューを選び、空・雨・傘で組む",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

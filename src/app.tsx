@@ -11,11 +11,12 @@ import { initClock, missedRequiredDays, monthStr, todayStr } from './lib/clock'
 import { dbGetAll } from './lib/db'
 import {
   arrivedCapsule,
+  arrivedMemoBag,
   clearNoteDraft,
   commitNote,
   gapStats,
   getCheckpoint,
-  hypothesisStats,
+  issueStats,
   listCheckpoints,
   loadNoteDraft,
   loadSettings,
@@ -23,40 +24,22 @@ import {
   openCapsule,
   saveCheckpoint,
   saveSettings,
+  setBagState,
   setCapsuleState,
   settleLegacyDrafts,
   settleStaleNoteDraft,
   type CapsuleWeek,
+  type MemoBagWeek,
 } from './lib/store'
 import { countWeekCompletions, planToday, recordCompletion, stageUnlocked, weekDots } from './lib/schedule'
 import type { CoachCard } from './data/coachCards'
-import {
-  EMPTY_FIELDS,
-  EMPTY_LINKS,
-  type CheckpointRecord,
-  type DayRecord,
-  type EvidenceKind,
-  type Note,
-  type NoteFields,
-  type NoteLinks,
-  type Settings,
-} from './lib/types'
+import type { CheckpointRecord, DayRecord, Note, NoteDraft, Settings } from './lib/types'
 
 type View =
   | { v: 'loading' }
   | { v: 'onboarding' }
   | { v: 'restart' }
-  | {
-      v: 'note'
-      minimal: boolean
-      hypothesisFrom: string | null
-      initialStep: number
-      initialFields: NoteFields
-      initialKind: EvidenceKind | null
-      initialLinks: NoteLinks
-      initialVisibleMs: number
-      initialStepMs: number
-    }
+  | { v: 'note'; minimal: boolean; issueFrom: string | null; draft: NoteDraft | null }
   | { v: 'done'; justCompleted: boolean; newCard: CoachCard | null; weekCount: number; closeTalkEligible: boolean }
   | { v: 'paused' }
   | { v: 'review' }
@@ -69,11 +52,12 @@ export function App() {
   const [dots, setDots] = useState<boolean[]>([])
   const [weekNotes, setWeekNotes] = useState<Note[]>([])
   const [capsule, setCapsule] = useState<CapsuleWeek | null>(null)
+  const [bag, setBag] = useState<MemoBagWeek | null>(null)
   const [toast, setToast] = useState(false)
   const [backupNudgeText, setBackupNudgeText] = useState<string | null>(null)
   const [ckHistory, setCkHistory] = useState<CheckpointRecord[]>([])
   const [ckPrevTalk, setCkPrevTalk] = useState<number | null>(null)
-  const [ckHypo, setCkHypo] = useState<Record<string, { h: number; n: number }>>({})
+  const [ckIssues, setCkIssues] = useState<Record<string, { f: number; n: number }>>({})
   const [ckGaps, setCkGaps] = useState<Record<string, { g: number; n: number }>>({})
   const [ckResume, setCkResume] = useState<{ audio?: ArrayBuffer; mimeType?: string } | null>(null)
 
@@ -153,6 +137,7 @@ export function App() {
     } else if (plan.kind === 'review') {
       setWeekNotes(notes)
       setCapsule(await arrivedCapsule())
+      setBag(await arrivedMemoBag())
       setView({ v: 'review' })
     } else {
       await startNote(s, plan.minimal)
@@ -162,18 +147,13 @@ export function App() {
   const startNote = async (s: Settings, minimal: boolean) => {
     const today = todayStr()
     const draft = await loadNoteDraft()
-    const sameDay = draft && draft.date === today ? draft : null
+    const sameDay = draft && draft.date === today && Array.isArray(draft.memos) ? draft : null
     lastMinimal.current = minimal
     setView({
       v: 'note',
       minimal,
-      hypothesisFrom: sameDay ? sameDay.hypothesisFrom : s.carryHypothesis,
-      initialStep: sameDay?.step ?? 0,
-      initialFields: sameDay?.fields ?? EMPTY_FIELDS,
-      initialKind: sameDay?.evidenceKind ?? null,
-      initialLinks: sameDay?.links ?? EMPTY_LINKS,
-      initialVisibleMs: sameDay?.visibleMs ?? 0,
-      initialStepMs: sameDay?.stepMs ?? 0,
+      issueFrom: sameDay ? sameDay.issueFrom : s.carryHypothesis,
+      draft: sameDay,
     })
   }
 
@@ -185,7 +165,7 @@ export function App() {
       s.closeTalk.month === pm ? s.closeTalk.count : s.closeTalkPrev.month === pm ? s.closeTalkPrev.count : 0
     setCkPrevTalk(prev)
     setCkHistory((await listCheckpoints()).filter((c) => c.month !== monthStr()))
-    setCkHypo(await hypothesisStats())
+    setCkIssues(await issueStats())
     setCkGaps(await gapStats())
     setCkResume(resume)
     setView({ v: 'checkpoint' })
@@ -220,9 +200,8 @@ export function App() {
     finalizing.current = true
     try {
       const s = settingsRef.current!
-      await commitNote(todayStr(), r.fields, r.evidenceKind, r.hypothesisFrom, r.durationSec, r.links)
-      const hyp = r.evidenceKind === 'hypothesis' && r.fields.evidence.trim() ? r.fields.evidence.trim() : null
-      const res = await recordCompletion(s, 'note', hyp)
+      await commitNote(todayStr(), r)
+      const res = await recordCompletion(s, 'note', r.issue.trim() || null)
       await updateSettings(res.settings)
       if (r.early) {
         // ヘッダ「今日はここまで」の誤タップ保険: 5秒だけ「続きを書く」(§2.2と同じ非ブロッキングUndo)
@@ -376,15 +355,9 @@ export function App() {
         <SessionNote
           settings={settings}
           minimal={view.minimal}
-          hypothesisFrom={view.hypothesisFrom}
-          initialStep={view.initialStep}
-          initialFields={view.initialFields}
-          initialKind={view.initialKind}
-          initialLinks={view.initialLinks}
-          initialVisibleMs={view.initialVisibleMs}
-          initialStepMs={view.initialStepMs}
-          showDiffHint={stageUnlocked(settings, 2)}
-          showTags={stageUnlocked(settings, 3)}
+          issueFrom={view.issueFrom}
+          draft={view.draft}
+          stages={{ issue: stageUnlocked(settings, 2), sky: stageUnlocked(settings, 3), conditions: stageUnlocked(settings, 4) }}
           onFinish={(r) => void finishNote(r)}
           onPause={() => setView({ v: 'paused' })}
           onSettings={openSettings}
@@ -397,7 +370,7 @@ export function App() {
           justCompleted={view.justCompleted}
           newCard={view.newCard}
           weekCount={view.weekCount}
-          showCloseTalk={view.closeTalkEligible && stageUnlocked(settings, 4)}
+          showCloseTalk={view.closeTalkEligible && stageUnlocked(settings, 5)}
           showReminderGuide={view.justCompleted && !settings.reminderGuideShown}
           backupNudge={backupNudgeText}
           onCloseTalk={() => void closeTalk()}
@@ -416,7 +389,9 @@ export function App() {
         <Review
           notes={weekNotes}
           capsule={capsule}
+          bag={bag}
           onPick={() => reviewPick()}
+          onBagState={(b, st) => setBagState(b, st)}
           onTalked={() => void closeTalk()}
           onOpenCapsule={async (c) => {
             const o = await openCapsule(c)
@@ -432,7 +407,7 @@ export function App() {
         <Checkpoint
           history={ckHistory}
           prevTalkCount={ckPrevTalk}
-          hypo={ckHypo}
+          issues={ckIssues}
           gaps={ckGaps}
           thisMonth={monthStr()}
           resume={ckResume}

@@ -2,21 +2,19 @@ import { dbDel, dbGet, dbGetAll, dbPut } from './db'
 import { decryptText, encryptText } from './crypto'
 import { lockNow, persistClock, todayStr, weekMonday } from './clock'
 import { extractKeywords } from './keywords'
-import { hasInsightWord, meetsCompletion, stripDigQuestions } from './metrics'
+import { hasInsightWord, stripDigQuestions } from './metrics'
 import type {
   BonusDraft,
   CheckpointRecord,
   DayRecord,
   DiaryEntry,
   Draft,
-  EvidenceKind,
+  Memo,
   Note,
   NoteDraft,
-  NoteFields,
-  NoteLinks,
   Settings,
 } from './types'
-import { DEFAULT_SETTINGS, EMPTY_FIELDS, hasGap, linksAnswered } from './types'
+import { DEFAULT_SETTINGS, conditionsAnswered, conditionsCount, hasGap, linksAnswered } from './types'
 
 // ---------- settings ----------
 
@@ -29,7 +27,7 @@ export async function saveSettings(s: Settings): Promise<void> {
   await dbPut('kv', s, 'settings')
 }
 
-// ---------- v2: ノート(五つの段 §14) ----------
+// ---------- v3: ノート(メモ→イシュー→空雨傘 §15) ----------
 
 export const loadNoteDraft = () => dbGet<NoteDraft>('kv', 'noteDraft')
 export const saveNoteDraft = (d: NoteDraft) => dbPut('kv', d, 'noteDraft')
@@ -39,54 +37,71 @@ export const getNote = (date: string) => dbGet<Note>('notes', date)
 export const listNotes = async () =>
   (await dbGetAll<Note>('notes')).sort((a, b) => (a.date < b.date ? -1 : 1))
 
-export async function commitNote(
-  date: string,
-  fields: NoteFields,
-  evidenceKind: EvidenceKind | null,
-  hypothesisFrom: string | null,
-  durationSec: number,
-  links: NoteLinks | undefined = undefined
-): Promise<void> {
+export const memoHasBody = (m: Memo) => m.title.trim().length > 0 && m.lines.some((l) => l.trim().length > 0)
+
+/** 完了条件(§15.6): 題と本文1行のあるメモが1枚以上 */
+export const draftComplete = (memos: Memo[]) => memos.some(memoHasBody)
+
+export interface NoteInput {
+  memos: Memo[]
+  issue: string
+  issueFromMemo: number | null
+  conditions: Note['conditions']
+  sky: string
+  rain: string
+  umbrella: string
+  links: Note['links']
+  issueFrom: string | null
+  durationSec: number
+}
+
+export async function commitNote(date: string, n: NoteInput): Promise<void> {
   const existing = await getNote(date)
-  const trimmed: NoteFields = { ...EMPTY_FIELDS }
-  for (const k of Object.keys(fields) as (keyof NoteFields)[]) trimmed[k] = fields[k].trim()
+  const memos = n.memos
+    .map((m) => ({ title: m.title.trim(), lines: m.lines.map((l) => l.trim()).filter(Boolean) }))
+    .filter(memoHasBody)
+  const issue = n.issue.trim() || null
   await dbPut('notes', {
     date,
-    fields: trimmed,
-    evidenceKind: trimmed.evidence ? evidenceKind : null,
-    hypothesisFrom,
-    links: linksAnswered(links) ? links : undefined,
-    durationSec,
+    memos,
+    issue,
+    issueFromMemo: issue ? n.issueFromMemo : null,
+    conditions: issue && conditionsAnswered(n.conditions) ? n.conditions : null,
+    sky: n.sky.trim(),
+    rain: n.rain.trim(),
+    umbrella: n.umbrella.trim(),
+    links: linksAnswered(n.links) ? n.links : undefined,
+    issueFrom: n.issueFrom,
+    durationSec: n.durationSec,
     createdAt: existing?.createdAt ?? Date.now(),
+    bagState: existing?.bagState,
   } satisfies Note)
   await persistClock()
 }
 
-/** 完了条件(§14.3): ①が空でなく、②に句点1つ or 20字以上 */
-export function noteComplete(f: NoteFields): boolean {
-  return f.content.trim().length > 0 && meetsCompletion(f.insight)
-}
-
-/** 今週(月曜〜今日)のノート。日曜の選び直し(§14.4)に使う */
+/** 今週(月曜〜今日)のノート。日曜の棚卸し(§15.7)に使う */
 export async function notesThisWeek(): Promise<Note[]> {
   const monday = weekMonday()
   return (await listNotes()).filter((n) => n.date >= monday && n.date <= todayStr())
 }
 
-/** 月ごとの仮説率(§14.5): ④にタグが付いたノートのうち「仮説」の割合 */
-export async function hypothesisStats(): Promise<Record<string, { h: number; n: number }>> {
-  const out: Record<string, { h: number; n: number }> = {}
+/** 表示用: v3はイシュー、v2(五つの段)は②を見出しにする */
+export const noteHeadline = (n: Note): string => n.issue ?? n.fields?.insight ?? n.memos?.[0]?.title ?? ''
+
+/** 月ごとのイシュー度(§15.6): 3条件そろい本数 / 判定したイシュー本数 */
+export async function issueStats(): Promise<Record<string, { f: number; n: number }>> {
+  const out: Record<string, { f: number; n: number }> = {}
   for (const n of await listNotes()) {
-    if (!n.evidenceKind) continue
+    if (!n.issue || !n.conditions) continue
     const m = n.date.slice(0, 7)
-    out[m] = out[m] ?? { h: 0, n: 0 }
+    out[m] = out[m] ?? { f: 0, n: 0 }
     out[m].n++
-    if (n.evidenceKind === 'hypothesis') out[m].h++
+    if (conditionsCount(n.conditions) === 3) out[m].f++
   }
   return out
 }
 
-/** 月ごとのずれ日数(§14.11): つなぎに答えた日のうち、一つでも「ずれ」があった日 */
+/** 月ごとのずれ日数(§15.5): つなぎに答えた日のうち、一つでも「ずれ」があった日 */
 export async function gapStats(): Promise<Record<string, { g: number; n: number }>> {
   const out: Record<string, { g: number; n: number }> = {}
   for (const n of await listNotes()) {
@@ -100,55 +115,105 @@ export async function gapStats(): Promise<Record<string, { g: number; n: number 
 }
 
 /**
- * 日付をまたいだ書きかけは自動保存(§2.1と同じ思想)。
- * 完了条件を満たしていればその日を完了扱いに遡及し、仮説の持ち越しも行う。
+ * 日付をまたいだ書きかけは自動保存。完了条件を満たしていればその日を完了扱いに遡及し、
+ * イシューがあれば翌日の「昨日のイシュー」にする。
  */
 export async function settleStaleNoteDraft(s: Settings): Promise<Settings> {
   const d = await loadNoteDraft()
   if (!d || d.date === todayStr()) return s
-  const hasText = Object.values(d.fields).some((v) => v.trim().length > 0)
-  if (hasText) {
-    await commitNote(d.date, d.fields, d.evidenceKind, d.hypothesisFrom, Math.round(d.visibleMs / 1000), d.links)
-    if (noteComplete(d.fields)) {
-      const existing = await dbGet<DayRecord>('days', d.date)
-      if (!existing) {
-        const hyp = d.evidenceKind === 'hypothesis' && d.fields.evidence.trim() ? d.fields.evidence.trim() : null
-        await dbPut('days', { date: d.date, mode: 'note', carryQuestion: hyp } satisfies DayRecord)
-        s = {
-          ...s,
-          completedSessions: s.completedSessions + 1,
-          lastSessionDate: s.lastSessionDate && s.lastSessionDate > d.date ? s.lastSessionDate : d.date,
-          carryHypothesis: hyp,
-        }
-        await saveSettings(s)
+  // v2の下書き(fieldsあり)はこの形を満たさないので捨てる
+  if (!Array.isArray(d.memos)) {
+    await clearNoteDraft()
+    return s
+  }
+  const memos = d.cur ? [...d.memos, { title: d.cur.title, lines: [...d.cur.lines, d.cur.line] }] : d.memos
+  if (draftComplete(memos)) {
+    await commitNote(d.date, {
+      memos,
+      issue: d.issue,
+      issueFromMemo: d.issueFromMemo,
+      conditions: d.conditions,
+      sky: d.sky,
+      rain: d.rain,
+      umbrella: d.umbrella,
+      links: d.links,
+      issueFrom: d.issueFrom,
+      durationSec: Math.round(d.visibleMs / 1000),
+    })
+    const existing = await dbGet<DayRecord>('days', d.date)
+    if (!existing) {
+      const issue = d.issue.trim() || null
+      await dbPut('days', { date: d.date, mode: 'note', carryQuestion: issue } satisfies DayRecord)
+      s = {
+        ...s,
+        completedSessions: s.completedSessions + 1,
+        lastSessionDate: s.lastSessionDate && s.lastSessionDate > d.date ? s.lastSessionDate : d.date,
+        carryHypothesis: issue,
       }
+      await saveSettings(s)
     }
   }
   await clearNoteDraft()
   return s
 }
 
+// ---------- メモの袋(§15.7): 90日後に1週分ずつ届く ----------
+
+export interface MemoBagWeek {
+  week: string
+  notes: Note[]
+}
+
+export async function arrivedMemoBag(): Promise<MemoBagWeek | null> {
+  const cutoff = todayStr(new Date(lockNow() - 90 * 86400000))
+  const all = (await listNotes()).filter((n) => !n.bagState && (n.memos?.length ?? 0) > 0 && n.date <= cutoff)
+  if (all.length === 0) return null
+  const week = weekMonday(new Date(all[0].date + 'T00:00:00'))
+  const notes = all.filter((n) => weekMonday(new Date(n.date + 'T00:00:00')) === week)
+  return { week, notes }
+}
+
+export async function setBagState(b: MemoBagWeek, state: 'opened' | 'discarded'): Promise<void> {
+  for (const n of b.notes) await dbPut('notes', { ...n, bagState: state })
+}
+
 /** Markdown書き出し(設定画面)。再生産可能な形で手元に残す */
 export function notesToMarkdown(notes: Note[]): string {
-  const kind = (k: EvidenceKind | null) =>
-    k === 'ground' ? '根拠' : k === 'counter' ? '反例' : k === 'hypothesis' ? '仮説' : '根拠'
+  const mark = (v: boolean | null | undefined) => (v === true ? '○' : v === false ? '△' : '—')
   return notes
-    .map((n) =>
-      [
-        `# ${n.date}`,
-        n.hypothesisFrom ? `> 昨日の仮説 ─ ${n.hypothesisFrom}\n` : '',
-        `## ① コンテンツ\n${n.fields.content}`,
-        `## ② 気づき\n${n.fields.insight}`,
-        `## ③ 自分のストーリー\n${n.fields.story}`,
-        `## ④ ${kind(n.evidenceKind)}\n${n.fields.evidence}`,
-        `## ⑤ 今後の行動\n${n.fields.action}`,
-        n.links
-          ? `つなぎ: ②→③ ${n.links.s23 === 'gap' ? 'ずれ' : '○'} / ②→④ ${n.links.s24 === 'gap' ? 'ずれ' : '○'} / ④→⑤ ${n.links.s45 === 'gap' ? 'ずれ' : '○'}`
-          : '',
-      ]
-        .filter((x) => x !== '')
+    .map((n) => {
+      if (n.fields) {
+        // v2(五つの段)
+        const f = n.fields
+        return [
+          `# ${n.date}`,
+          `## ① コンテンツ\n${f.content}`,
+          `## ② 気づき\n${f.insight}`,
+          `## ③ 自分のストーリー\n${f.story}`,
+          `## ④ 根拠\n${f.evidence}`,
+          `## ⑤ 今後の行動\n${f.action}`,
+        ].join('\n\n')
+      }
+      const memos = (n.memos ?? [])
+        .map((m, i) => `### メモ${i + 1}: ${m.title}\n${m.lines.map((l) => `- ${l}`).join('\n')}`)
         .join('\n\n')
-    )
+      const parts = [`# ${n.date}`, n.issueFrom ? `> 昨日のイシュー ─ ${n.issueFrom}` : '', memos]
+      if (n.issue) {
+        parts.push(
+          `## イシュー\n${n.issue}` +
+            (n.conditions
+              ? `\n\n変わる ${mark(n.conditions.pivotal)} / 常識と違う ${mark(n.conditions.deep)} / 答えを出せる ${mark(n.conditions.answerable)}`
+              : '')
+        )
+      }
+      if (n.sky || n.rain || n.umbrella) {
+        parts.push(`## 空(事実)\n${n.sky}`, `## 雨(解釈)\n${n.rain}`, `## 傘(行動)\n${n.umbrella}`)
+      }
+      if (n.links) {
+        parts.push(`つなぎ: 空→雨 ${n.links.sr === 'gap' ? 'ずれ' : '○'} / 雨→傘 ${n.links.ru === 'gap' ? 'ずれ' : '○'}`)
+      }
+      return parts.filter(Boolean).join('\n\n')
+    })
     .join('\n\n---\n\n')
 }
 
@@ -159,7 +224,6 @@ export const clearDraft = () => dbDel('kv', 'draft')
 export const loadBonusDraft = () => dbGet<BonusDraft>('kv', 'bonusDraft')
 export const clearBonusDraft = () => dbDel('kv', 'bonusDraft')
 
-/** v1.1から更新した直後に残っている排水/問いガイドの書きかけを、日記として確定する */
 export async function settleLegacyDrafts(): Promise<void> {
   const d = await loadDraft()
   if (d && d.date !== todayStr()) {

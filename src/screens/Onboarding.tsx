@@ -35,13 +35,13 @@ export function Onboarding({ onDone }: Props) {
       <div class="screen center onboarding">
         <div class="ob-mark">水路</div>
         <p class="ob-lead">
-          1日15分、五つの段。
+          1日15分。
           <br />
-          ①コンテンツ ②気づき ③自分のストーリー
+          1分1枚のメモを5枚、消さずに書き切る。
           <br />
-          ④根拠 ⑤今後の行動。
+          そこからイシューを一つ選び、
           <br />
-          毎日この型で一つ書いて、60秒で声に出す。
+          空・雨・傘で組み立て、20秒で声に出す。
         </p>
         <p class="ob-lead sub">このアプリは、書いたものを外に送らない。</p>
         <button class="primary big" onClick={() => setStep(2)}>

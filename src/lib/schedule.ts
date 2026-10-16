@@ -20,8 +20,8 @@ function nextUnlock(s: Settings): number | null {
 export type TodayPlan =
   | { kind: 'restart' }
   | { kind: 'completed' }
-  | { kind: 'note'; minimal: boolean } // 五つの段(月〜土、§14.2)
-  | { kind: 'review' } // 日曜の選び直し(§14.4)
+  | { kind: 'note'; minimal: boolean } // メモ→イシュー→空雨傘(月〜土、§15)
+  | { kind: 'review' } // 日曜の棚卸し(§15.7)
   | { kind: 'checkpoint' } // 定点観測(第1日曜 §3.6)
 
 /**
@@ -43,7 +43,7 @@ export function planToday(s: Settings, days: DayRecord[], weekNoteCount: number)
     const firstSunday = Number(today.slice(8)) <= 7
     const ckDoneThisMonth = days.some((d) => d.mode === 'checkpoint' && d.date.slice(0, 7) === today.slice(0, 7))
     if (firstSunday && !ckDoneThisMonth) return { kind: 'checkpoint' }
-    if (stageUnlocked(s, 5) && weekNoteCount > 0) return { kind: 'review' }
+    if (stageUnlocked(s, 6) && weekNoteCount > 0) return { kind: 'review' }
   }
   return { kind: 'note', minimal }
 }
@@ -57,7 +57,7 @@ export interface CompletionResult {
 /**
  * 完了記録(全モード共通 §7.1)。冪等: 同日のレコードが既にあれば
  * completedSessionsは増やさず、仮説の持ち越しとlastSessionDateだけ更新する。
- * @param carryHypothesis その日の④が仮説ならその文(翌日の①に添える)。それ以外はnull
+ * @param carryHypothesis その日のイシュー(翌日のメモ1に「昨日のイシュー」として添える)。なければnull
  */
 export async function recordCompletion(
   s: Settings,

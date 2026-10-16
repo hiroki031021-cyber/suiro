@@ -74,54 +74,88 @@ export interface DayRecord {
   carryQuestion: string | null
 }
 
-// ---------- v2: 五つの段(§14) ----------
+// ---------- v3: メモ→イシュー→空雨傘(§15) ----------
 
-/** ④のタグ。根拠/反例/仮説 */
-export type EvidenceKind = 'ground' | 'counter' | 'hypothesis'
-
-export interface NoteFields {
-  content: string // ①コンテンツ
-  insight: string // ②気づき
-  story: string // ③自分のストーリー
-  evidence: string // ④根拠・反例・仮説
-  action: string // ⑤今後の行動
+/** ゼロ秒メモ1枚: タイトル+最大6行。1分で凍結 */
+export interface Memo {
+  title: string
+  lines: string[]
 }
 
-export const NOTE_KEYS: (keyof NoteFields)[] = ['content', 'insight', 'story', 'evidence', 'action']
+/** イシューの3条件(§15.3)。true=○ / false=△ / null=未判定 */
+export interface IssueConditions {
+  pivotal: boolean | null // 答えが出ると何かが変わる
+  deep: boolean | null // 常識と違う見立て(深い仮説)
+  answerable: boolean | null // 今の自分に答えを出せる
+}
+export const EMPTY_CONDITIONS: IssueConditions = { pivotal: null, deep: null, answerable: null }
+export const conditionsAnswered = (c: IssueConditions | null | undefined) =>
+  !!c && Object.values(c).every((v) => v !== null)
+export const conditionsCount = (c: IssueConditions | null | undefined) =>
+  c ? Object.values(c).filter((v) => v === true).length : 0
 
-export const EMPTY_FIELDS: NoteFields = { content: '', insight: '', story: '', evidence: '', action: '' }
-
-/** つなぎ(§14.11): ②を中心に3つの対がつながっているかの自己判定 */
+/** つなぎ(§15.5): 空→雨、雨→傘 */
 export type LinkState = 'ok' | 'gap'
 export interface NoteLinks {
-  s23: LinkState | null // ③は②の実例か
-  s24: LinkState | null // ④の主語を自分に戻すと②になるか
-  s45: LinkState | null // ④が本当なら⑤は自然か
+  sr: LinkState | null // 雨は空から言えるか
+  ru: LinkState | null // 傘は雨から導けるか
 }
-export const EMPTY_LINKS: NoteLinks = { s23: null, s24: null, s45: null }
+export const EMPTY_LINKS: NoteLinks = { sr: null, ru: null }
 export const hasGap = (l: NoteLinks | undefined | null) => !!l && Object.values(l).some((v) => v === 'gap')
 export const linksAnswered = (l: NoteLinks | undefined | null) => !!l && Object.values(l).every((v) => v !== null)
 
-/** 1日1件。平文・端末内のみ(日曜に読み返すのが機能なので暗号化しない §14.6) */
+/** v2(2026-10-09〜15)の五つの段。読み出し互換のみ */
+export type EvidenceKind = 'ground' | 'counter' | 'hypothesis'
+export interface NoteFields {
+  content: string
+  insight: string
+  story: string
+  evidence: string
+  action: string
+}
+
+/** 1日1件。平文・端末内のみ。メモは90日後まで読み返さない(§15.7) */
 export interface Note {
   date: string // YYYY-MM-DD(キー)
-  fields: NoteFields
-  evidenceKind: EvidenceKind | null
-  /** この日の①の上に添えられていた前日の仮説 */
-  hypothesisFrom: string | null
-  /** つなぎの判定(①②だけの日・途中終了の日はundefined) */
+  memos: Memo[]
+  /** 「〜ではないか」の形のイシュー。段階2未満・途中終了ならnull */
+  issue: string | null
+  /** イシューの元になったメモの番号(0始まり)。新しく書いたならnull */
+  issueFromMemo: number | null
+  conditions: IssueConditions | null
+  sky: string // 事実
+  rain: string // 解釈(So what?)
+  umbrella: string // 行動
   links?: NoteLinks
+  /** この日のメモ1の上に添えられていた前日のイシュー */
+  issueFrom: string | null
   durationSec: number
   createdAt: number
+  /** メモの袋(§15.7): 90日後に読んだ/流した */
+  bagState?: 'opened' | 'discarded'
+  // ---- v2互換 ----
+  fields?: NoteFields
+  evidenceKind?: EvidenceKind | null
+  hypothesisFrom?: string | null
 }
+
+export type Phase = 'memo' | 'issue' | 'sky' | 'rain' | 'umbrella' | 'links'
+export const PHASES: Phase[] = ['memo', 'issue', 'sky', 'rain', 'umbrella', 'links']
 
 export interface NoteDraft {
   date: string
-  step: number
-  fields: NoteFields
-  evidenceKind: EvidenceKind | null
-  hypothesisFrom: string | null
-  links?: NoteLinks
+  phase: Phase
+  memos: Memo[] // 凍結済みのメモ
+  /** 書きかけのメモ(タイトル・確定行・現在行)。memoの段のみ */
+  cur: { title: string; lines: string[]; line: string; elapsedMs: number } | null
+  issue: string
+  issueFromMemo: number | null
+  conditions: IssueConditions
+  sky: string
+  rain: string
+  umbrella: string
+  links: NoteLinks
+  issueFrom: string | null
   visibleMs: number
   stepMs: number
 }
@@ -157,7 +191,7 @@ export interface Settings {
   unlockedStages: number[]
   completedSessions: number
   lastSessionDate: string | null
-  /** 前日の④が仮説だったとき、翌日の①の上に添える(消費したらnull) */
+  /** 前日のイシュー。翌日のメモ1の上に「昨日のイシュー」として添える(消費したらnull) */
   carryHypothesis: string | null
   lastBackupAt: number | null
   closeTalk: { month: string; count: number }

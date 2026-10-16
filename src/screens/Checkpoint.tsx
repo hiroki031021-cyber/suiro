@@ -6,8 +6,8 @@ import type { CheckpointRecord } from '../lib/types'
 interface Props {
   history: CheckpointRecord[] // 過去分(今月を含まない)
   prevTalkCount: number | null // 先月の声出し回数
-  /** 月ごとの仮説率(§14.5)。キーはYYYY-MM */
-  hypo: Record<string, { h: number; n: number }>
+  /** 月ごとのイシュー度(§15.6)。キーはYYYY-MM */
+  issues: Record<string, { f: number; n: number }>
   /** 月ごとのずれ日数(§14.11) */
   gaps: Record<string, { g: number; n: number }>
   thisMonth: string
@@ -27,7 +27,7 @@ function pickMime(): string | null {
 }
 
 /** 月1・第1日曜の定点観測(§3.6)。録音失敗時はタイマーのみのフォールバックで完了できる */
-export function Checkpoint({ history, prevTalkCount, hypo, gaps, thisMonth, resume, onRecorded, onSaveMetrics, onExit }: Props) {
+export function Checkpoint({ history, prevTalkCount, issues, gaps, thisMonth, resume, onRecorded, onSaveMetrics, onExit }: Props) {
   const [phase, setPhase] = useState<'intro' | 'recording' | 'count' | 'done'>(resume ? 'count' : 'intro')
   const [seconds, setSeconds] = useState(60)
   const [audioUrl, setAudioUrl] = useState<string | null>(() => {
@@ -184,8 +184,8 @@ export function Checkpoint({ history, prevTalkCount, hypo, gaps, thisMonth, resu
       {phase === 'done' && (
         <>
           {prevTalkCount !== null && <p class="hint-static">{COPY.ckPrevTalk(prevTalkCount)}</p>}
-          {hypo[thisMonth] && (
-            <InlineHint text={`今月の${COPY.ckHypo(hypo[thisMonth].h, hypo[thisMonth].n)}`} why={COPY.ckHypoWhy} />
+          {issues[thisMonth] && (
+            <InlineHint text={`今月の${COPY.ckIssue(issues[thisMonth].f, issues[thisMonth].n)}`} why={COPY.ckIssueWhy} />
           )}
           {gaps[thisMonth] && (
             <InlineHint text={`今月の${COPY.ckGaps(gaps[thisMonth].g, gaps[thisMonth].n)}`} why={COPY.ckGapsWhy} />
@@ -198,7 +198,7 @@ export function Checkpoint({ history, prevTalkCount, hypo, gaps, thisMonth, resu
                   <span>語数 {h.wordCount ?? '—'}</span>
                   <span>えー・あの {h.fillerCount ?? '—'}</span>
                   <span>沈黙 {h.silenceCount ?? '—'}</span>
-                  {hypo[h.month] && <span>{COPY.ckHypo(hypo[h.month].h, hypo[h.month].n)}</span>}
+                  {issues[h.month] && <span>{COPY.ckIssue(issues[h.month].f, issues[h.month].n)}</span>}
                   {gaps[h.month] && <span>{COPY.ckGaps(gaps[h.month].g, gaps[h.month].n)}</span>}
                 </div>
               ))}

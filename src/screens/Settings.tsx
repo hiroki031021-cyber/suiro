@@ -115,7 +115,7 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         value={settings.donePhrase}
         onInput={(e: any) => set({ donePhrase: e.currentTarget.value })}
       />
-      <label class="field-label">1日の持ち時間(声の60秒を含む。各段の配分は比例して伸縮)</label>
+      <label class="field-label">1日の持ち時間(メモ5分と声の20秒を含む。イシュー以降の配分が比例して伸縮)</label>
       <select
         class="text-input"
         value={String(settings.sessionMinutes)}
@@ -152,7 +152,7 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         <p class="empty">まだない</p>
       ) : (
         <>
-          <p class="note">{notes.length}日分。日々の読み返しはしない — 日曜に今週の②が並ぶ。</p>
+          <p class="note">{notes.length}日分。メモは90日後、イシューは日曜に戻ってくる。</p>
           <button class="ghost" onClick={() => downloadText('suiro-notes.md', notesToMarkdown(notes), 'text/markdown')}>
             Markdownで書き出す
           </button>
