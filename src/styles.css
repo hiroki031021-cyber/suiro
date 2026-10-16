@@ -1073,3 +1073,26 @@ button {
   font-size: 15px;
   font-weight: 600;
 }
+
+/* ---- 診断(§15.11) ---- */
+.diag {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.diag-log {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--fg-soft);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  max-height: 260px;
+  overflow: auto;
+}

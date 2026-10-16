@@ -187,6 +187,8 @@ export interface Settings {
   donePhrase: string
   /** 1日の持ち時間(分)。声の60秒を含む。既定15 */
   sessionMinutes: number
+  /** メモの縛り(削除不可)を外し、普通の入力欄にする(端末で入力が壊れたときの逃げ道 §15.11) */
+  memoLoose: boolean
   unlockAll: boolean
   unlockedStages: number[]
   completedSessions: number
@@ -214,6 +216,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyTime: '21:00',
   donePhrase: '水路、通った',
   sessionMinutes: 15,
+  memoLoose: false,
   unlockAll: false,
   unlockedStages: [],
   completedSessions: 0,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks'
+import { InputDiag } from '../components/InputDiag'
 import { COACH_CARDS } from '../data/coachCards'
 import { COPY } from '../lib/copy'
 import { dbGetAll } from '../lib/db'
@@ -126,6 +127,16 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         <option value="20">20分</option>
       </select>
 
+      <label class="check-row">
+        <input
+          type="checkbox"
+          checked={settings.memoLoose}
+          onChange={(e: any) => set({ memoLoose: e.currentTarget.checked })}
+        />
+        メモの縛りを外す(削除できる普通の入力欄にする)
+      </label>
+      <p class="note">端末でメモの入力が壊れたときの逃げ道。1分のタイマーと6行の上限は残る。</p>
+
       <div class="section-label">型の稽古</div>
       <label class="check-row">
         <input
@@ -212,6 +223,13 @@ export function SettingsScreen({ settings, onChange, onBack }: Props) {
         }}
       />
       {msg && <p class="note">{msg}</p>}
+
+      <div class="section-label">診断</div>
+      <p class="note">ビルド {__APP_VERSION__}</p>
+      <details class="card-details">
+        <summary>入力の診断(メモで文字が打てないときに開く)</summary>
+        <InputDiag />
+      </details>
     </div>
   )
 }

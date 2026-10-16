@@ -350,25 +350,61 @@ export function SessionNote(props: Props) {
             </button>
           )}
           <div class="memo-sheet">
-            <NonstopEditor
-              key={`m${memos.length}-${sheetKey}`}
-              initial={memoText}
-              placeholder={COPY.memoPh}
-              maxLines={MAX_LINES}
-              disabled={frozen}
-              register={(a) => {
-                editor.current = a
-              }}
-              onChange={(v) => {
-                if (v.trim()) startMemoClock()
-                st.current.memoText = v
-                setMemoText(v)
-                schedulePersist()
-              }}
-              onBlockedDelete={blockedDelete}
-              onBlockedPaste={() => setHint({ text: COPY.memoPaste })}
-              onLineLimit={() => setHint({ text: COPY.memoLineLimit })}
-            />
+            {props.settings.memoLoose ? (
+              // 縛りなし(設定): 削除可の普通の欄。行数上限だけ切り詰めで守る(§15.11)
+              <PlainEditor
+                key={`m${memos.length}-${sheetKey}`}
+                class="memo-editor"
+                initial={memoText}
+                placeholder={COPY.memoPh}
+                disabled={frozen}
+                register={(el) => {
+                  editor.current = {
+                    getValue: () => el.value,
+                    setValue: (t) => {
+                      el.value = t
+                      st.current.memoText = t
+                      setMemoText(t)
+                      return true
+                    },
+                    focus: () => el.focus(),
+                    blur: () => el.blur(),
+                  }
+                }}
+                onChange={(raw) => {
+                  const parts = raw.split('\n')
+                  const v = parts.length > MAX_LINES ? parts.slice(0, MAX_LINES).join('\n') : raw
+                  if (v !== raw) {
+                    editor.current?.setValue(v)
+                    setHint({ text: COPY.memoLineLimit })
+                  }
+                  if (v.trim()) startMemoClock()
+                  st.current.memoText = v
+                  setMemoText(v)
+                  schedulePersist()
+                }}
+              />
+            ) : (
+              <NonstopEditor
+                key={`m${memos.length}-${sheetKey}`}
+                initial={memoText}
+                placeholder={COPY.memoPh}
+                maxLines={MAX_LINES}
+                disabled={frozen}
+                register={(a) => {
+                  editor.current = a
+                }}
+                onChange={(v) => {
+                  if (v.trim()) startMemoClock()
+                  st.current.memoText = v
+                  setMemoText(v)
+                  schedulePersist()
+                }}
+                onBlockedDelete={blockedDelete}
+                onBlockedPaste={() => setHint({ text: COPY.memoPaste })}
+                onLineLimit={() => setHint({ text: COPY.memoLineLimit })}
+              />
+            )}
             <div class="memo-count">
               {Math.max(0, memoText.split('\n').length - 1)}/{MAX_LINES - 1}行
             </div>

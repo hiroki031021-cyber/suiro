@@ -1,6 +1,6 @@
 // 水路 service worker — installでコアをプリキャッシュ+ネットワーク優先/キャッシュフォールバック
 // パスはすべてSWのスコープ相対(GitHub Pagesのサブパス配信に対応)
-const CACHE = 'suiro-v8'
+const CACHE = 'suiro-v9'
 const CORE = ['./', './manifest.webmanifest', './icon.svg', './icon-512.png', './apple-touch-icon.png']
 
 self.addEventListener('install', (e) => {
@@ -42,7 +42,9 @@ self.addEventListener('fetch', (e) => {
     (async () => {
       const cache = await caches.open(CACHE)
       try {
-        const res = await fetch(e.request)
+        // ナビゲーション(index.html)はHTTPキャッシュを使わず再検証する。GitHub Pagesはmax-age=600を返すため、
+        // 更新直後に古いindex→古いJSが10分間使われ続けるのを防ぐ
+        const res = await fetch(e.request, e.request.mode === 'navigate' ? { cache: 'no-cache' } : undefined)
         if (res.ok) await cache.put(e.request, res.clone())
         return res
       } catch {
