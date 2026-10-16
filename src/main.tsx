@@ -4,13 +4,7 @@ import './styles.css'
 
 render(<App />, document.getElementById('app')!)
 
-/**
- * 更新の配送(§15.12)。GitHub Pagesは index.html と sw.js に max-age=600 を返すため、
- * 既定のままだと更新後10分は古い版が読まれ、ホーム画面アプリでは次の次の起動まで残る。
- * - updateViaCache:'none' で sw.js 自体をHTTPキャッシュに通さない
- * - 起動時・前面復帰時に version.json(no-store)を見て、違えば registration.update()
- * - 新しいSWが有効になったら 'suiro:update' を投げ、UIが「更新する」を出す(勝手にリロードしない)
- */
+// 更新の配送: sw.jsをHTTPキャッシュに通さず、version.jsonで新版を検知して「更新する」を出す
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     void (async () => {
@@ -20,7 +14,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
       } catch {
         return
       }
-      const announce = () => window.dispatchEvent(new CustomEvent('suiro:update'))
+      const announce = () => window.dispatchEvent(new CustomEvent('app:update'))
       if (reg.waiting && navigator.serviceWorker.controller) announce()
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing
@@ -34,7 +28,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
           const j = (await r.json()) as { version?: string }
           if (j.version && j.version !== __APP_VERSION__) await reg.update()
         } catch {
-          /* オフライン等 */
+          /* オフライン */
         }
       }
       void check()

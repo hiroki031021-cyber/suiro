@@ -1,26 +1,22 @@
-// 水路 service worker — installでコアをプリキャッシュ+ネットワーク優先/キャッシュフォールバック
-// パスはすべてSWのスコープ相対(GitHub Pagesのサブパス配信に対応)
-const CACHE = 'suiro-v10'
+// service worker — コアをプリキャッシュ+ネットワーク優先/キャッシュフォールバック。
+// GitHub Pagesはmax-age=600を返すため、index/プリキャッシュはHTTPキャッシュを通さない。
+const CACHE = 'zerobyo-v1'
 const CORE = ['./', './manifest.webmanifest', './icon.svg', './icon-512.png', './apple-touch-icon.png']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE)
-      // プリキャッシュはHTTPキャッシュを通さない(古いindexを新しいキャッシュ名で抱え込まない)
       await Promise.all(CORE.map((u) => cache.add(new Request(u, { cache: 'reload' }))))
       try {
-        // index.htmlが参照するハッシュ付きアセット(JS/CSS)もプリキャッシュする
         const res = await cache.match('./')
         if (res) {
           const html = await res.text()
-          const assets = [...html.matchAll(/(?:\.\/)?assets\/[^"' )]+/g)].map((m) =>
-            new URL(m[0], self.location.href).href
-          )
+          const assets = [...html.matchAll(/(?:\.\/)?assets\/[^"' )]+/g)].map((m) => new URL(m[0], self.location.href).href)
           if (assets.length) await cache.addAll([...new Set(assets)])
         }
       } catch {
-        // アセット解析失敗時もコアは入っている(2回目以降のfetchで埋まる)
+        /* 2回目以降のfetchで埋まる */
       }
       await self.skipWaiting()
     })()
@@ -39,14 +35,11 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url)
   if (e.request.method !== 'GET' || url.origin !== location.origin) return
-  // 更新検知用のversion.jsonはSWを素通し(常に最新)
-  if (url.pathname.endsWith('/version.json')) return
+  if (url.pathname.endsWith('/version.json')) return // 更新検知は常に素通し
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE)
       try {
-        // ナビゲーション(index.html)はHTTPキャッシュを使わず再検証する。GitHub Pagesはmax-age=600を返すため、
-        // 更新直後に古いindex→古いJSが10分間使われ続けるのを防ぐ
         const res = await fetch(e.request, e.request.mode === 'navigate' ? { cache: 'no-cache' } : undefined)
         if (res.ok) await cache.put(e.request, res.clone())
         return res
