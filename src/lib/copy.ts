@@ -12,6 +12,8 @@ export const COPY = {
   memoLabel: 'メモ',
   memoPh: '1行目に題(頭に浮かんだ問い・引っかかり)\n2行目から本文。1行1文、20〜30字、6行まで',
   memoLineLimit: '6行で満了。次の1枚へ',
+  memoEmptyFrozen: '本文がないまま1分。この紙はやり直せる',
+  memoRedo: 'やり直す',
   memoGetTitle: '題をもらう',
   memoFrozen: '1分。次の1枚へ',
   memoFrozenLast: '1分。5枚そろった',

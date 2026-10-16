@@ -56,9 +56,14 @@ export function SessionNote(props: Props) {
 
   const [phase, setPhase] = useState<Phase>(d?.phase && phases.includes(d.phase) ? d.phase : 'memo')
   const [memos, setMemos] = useState<Memo[]>(d?.memos ?? [])
-  const [memoText, setMemoText] = useState(d?.cur && typeof d.cur.text === 'string' ? d.cur.text : '')
-  const [memoMs, setMemoMs] = useState(d?.cur?.elapsedMs ?? 0)
-  const [frozen, setFrozen] = useState((d?.cur?.elapsedMs ?? 0) >= MEMO_MS)
+  // 復元: 本文のない紙は凍結しない(古い形の下書きや、題だけで60秒過ぎた紙で入力欄が死ぬのを防ぐ)
+  const initText = d?.cur && typeof d.cur.text === 'string' ? d.cur.text : ''
+  const initHasBody = memoHasBody(memoFromText(initText))
+  const initMs = initHasBody ? (d?.cur?.elapsedMs ?? 0) : 0
+  const [memoText, setMemoText] = useState(initText)
+  const [memoMs, setMemoMs] = useState(initMs)
+  const [frozen, setFrozen] = useState(initMs >= MEMO_MS)
+  const [sheetKey, setSheetKey] = useState(0)
   const [issue, setIssue] = useState(d?.issue ?? '')
   const [issueFromMemo, setIssueFromMemo] = useState<number | null>(d?.issueFromMemo ?? null)
   const [pickOther, setPickOther] = useState(false)
@@ -77,7 +82,7 @@ export function SessionNote(props: Props) {
   st.current = { phase, memos, memoText, memoMs, frozen, issue, issueFromMemo, cond, sky, rain, umbrella, links }
   const visibleMs = useRef(d?.visibleMs ?? 0)
   const stepMs = useRef(d?.stepMs ?? 0)
-  const memoStarted = useRef((d?.cur?.elapsedMs ?? 0) > 0)
+  const memoStarted = useRef(initMs > 0)
   const saveTimer = useRef<number | null>(null)
   const finished = useRef(false)
   const editor = useRef<EditorApi | null>(null)
@@ -223,6 +228,18 @@ export function SessionNote(props: Props) {
       persist()
     }
   }
+  /** 題だけで60秒が過ぎた等、本文のない紙はやり直せる(枚数は進めない) */
+  const redoMemo = () => {
+    st.current.memoText = ''
+    setMemoText('')
+    setMemoMs(0)
+    setProgress(0)
+    setFrozen(false)
+    setHint(null)
+    memoStarted.current = false
+    setSheetKey((k) => k + 1)
+    persist()
+  }
   const setTitleText = (t: string) => {
     if (st.current.frozen || st.current.memoText.trim()) return
     if (!editor.current?.setValue(t + '\n')) return
@@ -334,7 +351,7 @@ export function SessionNote(props: Props) {
           )}
           <div class="memo-sheet">
             <NonstopEditor
-              key={`m${memos.length}`}
+              key={`m${memos.length}-${sheetKey}`}
               initial={memoText}
               placeholder={COPY.memoPh}
               maxLines={MAX_LINES}
@@ -364,11 +381,19 @@ export function SessionNote(props: Props) {
                 {COPY.memoGetTitle}
               </button>
             )}
-            {frozen && (
+            {frozen && memoHasBody(memoFromText(memoText)) && (
               <>
                 <span class="end-line fade-in">{memos.length + 1 >= memoTotal ? COPY.memoFrozenLast : COPY.memoFrozen}</span>
-                <button class="primary push-right" disabled={!memoHasBody(memoFromText(memoText))} onClick={nextMemo}>
+                <button class="primary push-right" onClick={nextMemo}>
                   {memos.length + 1 >= memoTotal ? (phases.length === 1 ? COPY.noteFinish : COPY.memoToIssue) : COPY.memoNext}
+                </button>
+              </>
+            )}
+            {frozen && !memoHasBody(memoFromText(memoText)) && (
+              <>
+                <span class="end-line fade-in">{COPY.memoEmptyFrozen}</span>
+                <button class="primary push-right" onClick={redoMemo}>
+                  {COPY.memoRedo}
                 </button>
               </>
             )}
